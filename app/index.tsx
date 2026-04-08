@@ -1,0 +1,1607 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { onAuthStateChanged } from 'firebase/auth';
+import {
+  arrayUnion,
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Alert,
+  Animated,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { auth, firestore } from '../firebase';
+import { useUser } from './_layout';
+
+const dbgColor = '#0a0513ff';
+const bgColor = '#111124ff';
+const lbgColor = '#322f4e81';
+const l2bgColor = '#322f4eff';
+const l3bgColor = '#323150';
+const strongColor = '#cc7bdbff';
+
+const warmFontType = 'Molengo';
+const defFontType = 'OpenSansSemiBold';
+
+interface SleepEvent {
+  timestamp: number;
+  lockedIn: boolean;
+}
+interface UserProfile {
+  name: string;
+  sleepEvents: [];
+  pastcomps: Array<{
+    date: string;
+    money: number;
+    points: number;
+    rank: number;
+    won: boolean;
+  }>;
+  competitions: [];
+}
+
+interface Competition {
+  id: string;
+  dates: {
+    start: string;
+    end: string;
+  };
+  status: 'ongoing' | 'upcoming' | 'finished';
+  participants: number;
+  prizePool: number;
+  reward: string;
+  isMoney: boolean;
+  userJoined: boolean;
+  name: string;
+}
+
+type DayProgress = {
+  day: string;
+  points: number;
+  lastPutDown: string;
+};
+
+export default function HomeScreen() {
+  const { userData } = useUser();
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [competitions, setCompetitions] = useState<Competition[]>([]);
+  const [isJoining, setIsJoining] = useState<string | null>(null);
+  const [weeklyProgress, setWeeklyProgress] = useState<DayProgress[]>([]);
+  const [scrollPosition, setScrollPosition] = useState(0);
+  const [scrollViewWidth, setScrollViewWidth] = useState(0);
+  const [contentWidth, setContentWidth] = useState(0);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  const [stats, setStats] = useState<{
+    totalWins: number;
+    averageBedtime: string;
+    weeksPlayed: number;
+    bestRank: string | number;
+  }>({
+    totalWins: 0,
+    averageBedtime: 'N/A',
+    weeksPlayed: 0,
+    bestRank: 'N/A',
+  });
+
+  const [collapseFinished, setCollapseFinished] = useState(true);
+  const [theButtonPressed, setTheButtonPressed] = useState(true);
+  
+  const navigation = useNavigation<any>();
+
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [competitionsLoading, setCompetitionsLoading] = useState(true);
+  const [hasInitialized, setHasInitialized] = useState(false);
+
+  const [uid, setUid] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+
+  const canScrollLeft = scrollPosition > 5;
+  const canScrollRight =
+    scrollViewWidth > 0 &&
+    contentWidth > 0 &&
+    scrollPosition < contentWidth - scrollViewWidth - 5;
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+    setScrollPosition(contentOffset.x);
+    setScrollViewWidth(layoutMeasurement.width);
+    setContentWidth(contentSize.width);
+  };
+
+  const handleContentSizeChange = (width: number, _height: number) => {
+    setContentWidth(width);
+  };
+
+  const handleLayout = (event: any) => {
+    setScrollViewWidth(event.nativeEvent.layout.width);
+  };
+
+  const scrollLeft = () => {
+    const newPosition = Math.max(0, scrollPosition - 200);
+    scrollViewRef.current?.scrollTo({ x: newPosition, animated: true });
+  };
+
+  const scrollRight = () => {
+    const maxScroll = contentWidth - scrollViewWidth;
+    const newPosition = Math.min(maxScroll, scrollPosition + 200);
+    scrollViewRef.current?.scrollTo({ x: newPosition, animated: true });
+  };
+
+  const goToCompetition = (competitionId: string) => {
+    navigation.navigate('competition', { competitionId });
+  };
+
+  const getTodayIndex = () => new Date().getDay();
+  const recordSleepEvent = async (lockedIn: boolean) => {
+    if(!uid) return;
+
+    const newEvent: SleepEvent = {
+      timestamp: Date.now(),
+      lockedIn,
+    };
+
+    const profileRef = doc(firestore, 'profiledb', uid);
+    await updateDoc(profileRef, {SleepEvents: arrayUnion(newEvent),});
+  };
+  const calculatePointsFromWeektime = (weekTimeValue: number) => {
+    if (weekTimeValue < 0) return 0;
+
+    const fivePM = 17 * 60;
+    const ninePM = 21 * 60;
+    const totalDuration = 6 * 60;
+
+    let timeFromNinePM: number;
+
+    if (weekTimeValue >= ninePM) {
+      timeFromNinePM = weekTimeValue - ninePM;
+    } else if (weekTimeValue >= fivePM) {
+      return 30;
+    } else {
+      timeFromNinePM = 24 * 60 - ninePM + weekTimeValue;
+    }
+
+    if (timeFromNinePM <= totalDuration) {
+      return Math.max(
+        0,
+        Math.round(30 * (1 - timeFromNinePM / totalDuration) * 1000) / 1000
+      );
+    }
+
+    return 0;
+  };
+
+  const formatTimeFromMinutes = (weekTimeValue: number) => {
+    if (weekTimeValue < 0) return '--';
+
+    const hours = Math.floor(weekTimeValue / 60);
+    const minutes = Math.floor(weekTimeValue % 60);
+
+    return `${hours === 0 ? 12 : hours > 12 ? (hours > 24 ? hours - 24 : hours - 12) : hours}:${minutes
+      .toString()
+      .padStart(2, '0')} ${hours >= 12 && hours < 24 ? 'PM' : 'AM'}`;
+  };
+
+  const convertWeektimesToProgressData = (weektimes: number[]) => {
+    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    return weekDays.map((day, index) => {
+      const weekTimeValue = weektimes?.[index] ?? -1;
+      return {
+        day,
+        points: calculatePointsFromWeektime(weekTimeValue),
+        lastPutDown: formatTimeFromMinutes(weekTimeValue),
+      };
+    });
+  };
+
+  const welcomeAnimation = useRef(new Animated.Value(0)).current;
+  const statusBannerAnimation = useRef(new Animated.Value(0)).current;
+  const progressAnimation = useRef(new Animated.Value(0)).current;
+  const competitionsAnimation = useRef(new Animated.Value(0)).current;
+  const statsAnimation = useRef(new Animated.Value(0)).current;
+  const resetButtonAnimation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setUid(user?.uid ?? null);
+      setAuthReady(true);
+      console.log('Auth state:', user ? user.uid : 'SIGNED OUT');
+    });
+    return unsub;
+  }, []);
+
+  const startAnimations = () => {
+    welcomeAnimation.setValue(0);
+    statusBannerAnimation.setValue(0);
+    competitionsAnimation.setValue(0);
+    progressAnimation.setValue(0);
+    statsAnimation.setValue(0);
+    resetButtonAnimation.setValue(0);
+
+    setHasInitialized(true);
+
+    const animationDuration = 400;
+    const staggerDelay = 150;
+
+    Animated.timing(welcomeAnimation, {
+      toValue: 1,
+      duration: animationDuration,
+      useNativeDriver: true,
+    }).start();
+
+    setTimeout(() => {
+      Animated.timing(statusBannerAnimation, {
+        toValue: 1,
+        duration: animationDuration,
+        useNativeDriver: true,
+      }).start();
+    }, staggerDelay);
+
+    setTimeout(() => {
+      Animated.timing(progressAnimation, {
+        toValue: 1,
+        duration: animationDuration,
+        useNativeDriver: true,
+      }).start();
+    }, staggerDelay * 2);
+
+    setTimeout(() => {
+      Animated.timing(competitionsAnimation, {
+        toValue: 1,
+        duration: animationDuration,
+        useNativeDriver: true,
+      }).start();
+    }, staggerDelay * 3);
+
+    setTimeout(() => {
+      Animated.timing(statsAnimation, {
+        toValue: 1,
+        duration: animationDuration,
+        useNativeDriver: true,
+      }).start();
+    }, staggerDelay * 4);
+
+    setTimeout(() => {
+      Animated.timing(resetButtonAnimation, {
+        toValue: 1,
+        duration: animationDuration,
+        useNativeDriver: true,
+      }).start();
+    }, staggerDelay * 5);
+  };
+
+  const minutesToTime = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    const displayHours = hours > 12 ? hours - 12 : hours === 0 ? 12 : hours;
+    const period = hours >= 12 ? 'PM' : 'AM';
+    return `${displayHours}:${mins.toString().padStart(2, '0')} ${period}`;
+  };
+
+  const calculateStats = (profileData: UserProfile) => {
+    if (!profileData?.pastcomps) {
+      return {
+        totalWins: 0,
+        averageBedtime: 'N/A',
+        weeksPlayed: 0,
+        bestRank: 'N/A',
+      };
+    }
+
+
+    const pastComps = profileData.pastcomps;
+    const totalWins = pastComps.filter((comp) => comp.won).length;
+    const weeksPlayed = pastComps.length;
+    const bestRank =
+      pastComps.length > 0 ? Math.min(...pastComps.map((comp) => comp.rank)) : 'N/A';
+    const averageBedtime =
+      profileData.avgbedtime >= 0 ? minutesToTime(profileData.avgbedtime) : 'N/A';
+
+    return {
+      totalWins,
+      averageBedtime,
+      weeksPlayed,
+      bestRank: bestRank === 'N/A' ? 'N/A' : `#${bestRank}`,
+    };
+  };
+  const isFirstRender = useRef(true);
+
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    recordSleepEvent(theButtonPressed);
+  }, [theButtonPressed]);
+  const getCompetitionStatus = (
+    startDate: string,
+    endDate: string
+  ): 'ongoing' | 'upcoming' | 'finished' => {
+    const now = new Date();
+
+    const parseLocalDate = (dateStr: string) => {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    };
+
+    const start = parseLocalDate(startDate);
+    const end = parseLocalDate(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    if (now < start) return 'upcoming';
+    if (now > end) return 'finished';
+    return 'ongoing';
+  };
+
+  const calculatePrizePool = (participantCount: number, isMoney: boolean): number => {
+    if (!isMoney) return 0;
+    return participantCount * 5;
+  };
+
+  const processCompetitionsData = (snapshot: any) => {
+    const competitionsData: Competition[] = [];
+
+    snapshot.forEach((docSnap: any) => {
+      const data = docSnap.data();
+
+      if (!data?.dates?.start || !data?.dates?.end) return;
+      if (!data?.players || typeof data.players !== 'object') return;
+
+      const playerUids = Object.keys(data.players);
+      const participantCount = playerUids.length;
+
+      const myUid = uid;
+      const myPlayerEntry = myUid ? data.players?.[myUid] : null;
+
+      const userJoined = !!myPlayerEntry;
+      const isMoney = data.reward === 'money';
+
+      const competition: Competition = {
+        id: docSnap.id,
+        dates: {
+          start: data.dates.start,
+          end: data.dates.end,
+        },
+        status: getCompetitionStatus(data.dates.start, data.dates.end),
+        participants: participantCount,
+        name: data.name ?? '(Untitled)',
+        reward: data.reward,
+        isMoney,
+        prizePool: calculatePrizePool(participantCount, isMoney),
+        userJoined,
+      };
+
+      competitionsData.push(competition);
+    });
+
+    competitionsData.sort((a, b) => {
+      const statusOrder: Record<string, number> = {
+        ongoing: 0,
+        upcoming: 1,
+        finished: 2,
+      };
+      if (a.status !== b.status) return statusOrder[a.status] - statusOrder[b.status];
+      return new Date(a.dates.start).getTime() - new Date(b.dates.start).getTime();
+    });
+
+    return competitionsData;
+  };
+
+  const toYYYYMMDD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const getThisWeeksDates = () => {
+    const today = new Date();
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(today.getDate() - today.getDay());
+
+    const dates: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      dates.push(toYYYYMMDD(d));
+    }
+    return dates;
+  };
+
+  const buildWeektimesFromSleepTimes = (sleepTimes?: Record<string, number>) => {
+    const dates = getThisWeeksDates();
+    return dates.map((dateStr) => {
+      const v = sleepTimes?.[dateStr];
+      return typeof v === 'number' ? v : -1;
+    });
+  };
+
+  useEffect(() => {
+    if (!uid) return;
+
+    setProfileLoading(true);
+    const userDocRef = doc(firestore, 'profiledb', uid);
+
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          const profileData = docSnapshot.data() as UserProfile;
+          setUserProfile(profileData);
+
+          const weektimes = buildWeektimesFromSleepTimes(profileData.sleepTimes);
+          setWeeklyProgress(convertWeektimesToProgressData(weektimes));
+          setStats(calculateStats(profileData));
+        } else {
+          console.log('User profile not found for uid:', uid);
+          setUserProfile(null);
+        }
+
+        setProfileLoading(false);
+      },
+      (error) => {
+        console.error('Error fetching user profile:', error);
+        setProfileLoading(false);
+        Alert.alert(
+          'Profile access error',
+          'Permission denied reading your profile. Check Firestore Rules.'
+        );
+      }
+    );
+
+    return unsubscribe;
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+
+    setCompetitionsLoading(true);
+    const competitionsCollection = collection(firestore, 'competitiondb');
+
+    const unsubscribe = onSnapshot(
+      competitionsCollection,
+      (snapshot) => {
+        const competitionsData = processCompetitionsData(snapshot);
+        setCompetitions(competitionsData);
+        setCompetitionsLoading(false);
+      },
+      (error) => {
+        console.error('Error fetching competitions:', error);
+        setCompetitionsLoading(false);
+        Alert.alert(
+          'Competitions access error',
+          'Permission denied reading competitions. Check Firestore Rules.'
+        );
+      }
+    );
+
+    return unsubscribe;
+  }, [uid]);
+
+  useEffect(() => {
+    if (!profileLoading && !competitionsLoading && uid) {
+      setTimeout(() => startAnimations(), 100);
+    }
+  }, [profileLoading, competitionsLoading, uid]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!profileLoading && !competitionsLoading && uid) {
+        setHasInitialized(false);
+        setTimeout(() => startAnimations(), 50);
+      }
+    }, [profileLoading, competitionsLoading, uid])
+  );
+
+  const handleJoinCompetition = async (competitionId: string) => {
+    if (!userData?.uid || !userProfile) {
+      Alert.alert('Error', 'Unable to join competition. Please try again.');
+      return;
+    }
+
+    const competition = competitions.find((comp) => comp.id === competitionId);
+    if (!competition) {
+      Alert.alert('Error', 'Competition not found.');
+      return;
+    }
+
+    if (competition.userJoined) {
+      Alert.alert('Already Joined', 'You are already in this competition!');
+      return;
+    }
+
+    if (competition.status === 'finished') {
+      Alert.alert('Competition Ended', 'This competition has already finished.');
+      return;
+    }
+
+    setIsJoining(competitionId);
+
+    try {
+      const competitionDocRef = doc(firestore, 'competitiondb', competitionId);
+      const snap = await getDoc(competitionDocRef);
+
+      if (!snap.exists()) {
+        Alert.alert('Error', 'Competition doc not found.');
+        return;
+      }
+
+      const currentUid = userData.uid;
+
+      await setDoc(
+        competitionDocRef,
+        {
+          players: {
+            [currentUid]: {
+              joinedAt: serverTimestamp(),
+              points: 0,
+            },
+          },
+        },
+        { merge: true }
+      );
+
+      Alert.alert('Competition Joined!', "You've successfully joined this competition.", [
+        { text: 'OK' },
+      ]);
+    } catch (error) {
+      console.error('Error joining competition:', error);
+      Alert.alert('Error', 'Failed to join competition. Please try again.');
+    } finally {
+      setIsJoining(null);
+    }
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const formatDateRange = (startDate: string, endDate: string) => {
+    const parseLocalDate = (dateStr: string) => {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    };
+
+    const start = parseLocalDate(startDate);
+    const end = parseLocalDate(endDate);
+
+    const startFormatted = start.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
+    const endFormatted = end.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
+
+    return `${startFormatted} - ${endFormatted}`;
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'ongoing':
+        return '#10B981';
+      case 'upcoming':
+        return '#F59E0B';
+      case 'finished':
+        return '#6B7280';
+      default:
+        return '#6B7280';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'ongoing':
+        return 'play-circle';
+      case 'upcoming':
+        return 'time';
+      case 'finished':
+        return 'checkmark-circle';
+      default:
+        return 'time';
+    }
+  };
+
+  const getAnimatedStyle = (animationValue: Animated.Value) => ({
+    opacity: animationValue,
+    transform: [
+      {
+        translateY: animationValue.interpolate({
+          inputRange: [0, 1],
+          outputRange: [30, 0],
+        }),
+      },
+    ],
+  });
+
+  if (!authReady) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Ionicons name="moon" size={48} color={strongColor} />
+          <Text style={styles.loadingText}>Checking login...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!uid) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Ionicons name="log-in-outline" size={48} color={strongColor} />
+          <Text style={styles.loadingText}>You’re signed out. Please sign in again.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (profileLoading || competitionsLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Ionicons name="moon" size={48} color={strongColor} />
+          <Text style={styles.loadingText}>
+            {profileLoading ? 'Loading your profile...' : 'Loading competitions...'}
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const userStats = [
+    {
+      id: 1,
+      title: 'Total Wins',
+      value: stats.totalWins.toString(),
+      icon: 'trophy',
+      color: strongColor,
+      backgroundColor: 'rgba(157, 78, 221, 0.15)',
+    },
+    {
+      id: 2,
+      title: 'Average Bedtime',
+      value: stats.averageBedtime,
+      icon: 'moon',
+      color: strongColor,
+      backgroundColor: 'rgba(157, 78, 221, 0.15)',
+    },
+    {
+      id: 3,
+      title: 'Weeks Played',
+      value: stats.weeksPlayed.toString(),
+      icon: 'calendar',
+      color: strongColor,
+      backgroundColor: 'rgba(157, 78, 221, 0.15)',
+    },
+    {
+      id: 4,
+      title: 'Best Rank',
+      value: stats.bestRank,
+      icon: 'medal-outline',
+      color: strongColor,
+      backgroundColor: 'rgba(157, 78, 221, 0.15)',
+    },
+  ];
+
+  const finishedCompetitions = competitions.filter(
+    (c) => c.status === 'finished' && c.userJoined === true
+  );
+  const activeCompetitions = competitions.filter(
+    (c) => c.status !== 'finished' && c.userJoined === true
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <View style={styles.content}>
+          {hasInitialized && (
+            <>
+              <Animated.View style={getAnimatedStyle(welcomeAnimation)}>
+                <Text style={[styles.warmFont, styles.welcomeText]}>
+                  Welcome, <Text style={styles.username}>{userData?.name ?? 'User'}</Text>
+                </Text>
+              </Animated.View>
+
+              <View style={styles.competitionsContainer}>
+                {competitions.some((comp) => comp.userJoined && comp.status === 'ongoing') && (
+                  <Animated.View
+                    style={[getAnimatedStyle(statusBannerAnimation), styles.statusBanner]}
+                  >
+                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                    <Text style={styles.statusText}>You're competing this week!</Text>
+                  </Animated.View>
+                )}
+
+                <Animated.View style={getAnimatedStyle(progressAnimation)}>
+                  <View style={styles.weeklyProgressContainer}>
+                    <Text style={styles.sectionTitle}>This Week's Progress</Text>
+                    <View style={styles.weeklyProgressWrapper}>
+                      {canScrollLeft && (
+                        <TouchableOpacity
+                          style={[styles.scrollArrowButton, styles.leftArrow]}
+                          onPress={scrollLeft}
+                        >
+                          <Ionicons name="chevron-back" size={20} color={strongColor} />
+                        </TouchableOpacity>
+                      )}
+
+                      <ScrollView
+                        ref={scrollViewRef}
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.weeklyScrollView}
+                        onScroll={handleScroll}
+                        onContentSizeChange={handleContentSizeChange}
+                        onLayout={handleLayout}
+                        scrollEventThrottle={16}
+                      >
+                        <View style={styles.weeklyProgressRow}>
+                          {weeklyProgress.map((dayData, index) => {
+                            const isToday = index === getTodayIndex();
+                            const isCompleted = (dayData?.points ?? 0) > 0;
+
+                            return (
+                              <View
+                                key={`${dayData.day}-${index}-${dayData.points}`}
+                                style={[
+                                  styles.dayCard,
+                                  isToday && styles.todayCard,
+                                  !isCompleted && isToday && styles.incompleteTodayCard,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.incompleteDayLabel,
+                                    isToday && styles.todayText,
+                                    isCompleted && styles.dayLabel,
+                                  ]}
+                                >
+                                  {dayData.day}
+                                </Text>
+
+                                <View style={styles.pointsContainer}>
+                                  <Ionicons
+                                    name="star"
+                                    size={16}
+                                    color={isCompleted ? strongColor : '#666'}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.dayPoints,
+                                      !isCompleted && styles.incompleteDayPoints,
+                                      isToday && isCompleted && styles.todayText,
+                                    ]}
+                                  >
+                                    {dayData.points}
+                                  </Text>
+                                </View>
+
+                                <View style={styles.timeContainer}>
+                                  <Ionicons
+                                    name="moon"
+                                    size={16}
+                                    color={isCompleted ? strongColor : '#666'}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.lastPutDownTime,
+                                      !isCompleted && styles.incompleteTime,
+                                      isToday && isCompleted && styles.todayText,
+                                    ]}
+                                  >
+                                    {dayData.lastPutDown}
+                                  </Text>
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </ScrollView>
+
+                      {canScrollRight && (
+                        <TouchableOpacity
+                          style={[styles.scrollArrowButton, styles.rightArrow]}
+                          onPress={scrollRight}
+                        >
+                          <Ionicons name="chevron-forward" size={20} color={strongColor} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                  
+        {/* This is the button that toggles giving points and whanot*/}
+                  <TouchableOpacity
+                    style={styles.theButton}
+                    onPress={() => setTheButtonPressed((prev) => !prev)}
+                  >
+                    <Ionicons
+                      name={theButtonPressed ? 'lock-closed-outline' : 'lock-open-outline'}
+                      size={40}
+                      color="#FFFFFF"
+                      style={styles.buttonIcon}
+                    />
+                    <Text style={styles.theButtonText}>
+                      {theButtonPressed
+                        ? 'Lock Out'
+                        : 'Lock In'}
+                    </Text>
+                  </TouchableOpacity>
+
+                </Animated.View>
+
+
+                
+                <Animated.View style={getAnimatedStyle(competitionsAnimation)}>
+                  {competitions.length === 0 ? (
+                    <View style={styles.noCompetitionsContainer}>
+                      <Ionicons name="trophy-outline" size={48} color="#666" />
+                      <Text style={styles.noCompetitionsText}>No competitions available</Text>
+                      <Text style={styles.noCompetitionsSubtext}>
+                        Check back soon for new competitions!
+                      </Text>
+                    </View>
+                  ) : (
+                    <View>
+                      {activeCompetitions.map((competition) => (
+                        <View key={competition.id} style={styles.competitionContainer}>
+                          <View style={styles.competitionHeader}>
+                            <Text style={styles.competitionTitle}>
+                              {competition.name}{' '}
+                              <Text style={styles.compId}>({competition.id})</Text>
+                            </Text>
+
+                            <View
+                              style={[
+                                styles.statusTag,
+                                {
+                                  backgroundColor: `${getStatusColor(competition.status)}20`,
+                                },
+                              ]}
+                            >
+                              <Ionicons
+                                name={getStatusIcon(competition.status) as any}
+                                size={20}
+                                color={getStatusColor(competition.status)}
+                              />
+                              <Text
+                                style={[
+                                  styles.statusTagText,
+                                  { color: getStatusColor(competition.status) },
+                                ]}
+                              >
+                                {competition.status.toUpperCase()}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <Text style={styles.dateRange}>
+                            {formatDateRange(competition.dates.start, competition.dates.end)}
+                          </Text>
+
+                          <View style={styles.competitionStatsContainer}>
+                            <View style={styles.competitionStatBox}>
+                              <View style={styles.competitionIconContainer}>
+                                <Ionicons name="people" size={24} color={strongColor} />
+                              </View>
+                              <Text style={styles.competitionStatNumber}>
+                                {competition.participants.toLocaleString()}
+                              </Text>
+                              <Text style={styles.competitionStatLabel}>Users</Text>
+                            </View>
+
+                            <View style={styles.competitionStatBox}>
+                              <View style={styles.competitionIconContainer}>
+                                <Ionicons name="cash" size={24} color={strongColor} />
+                              </View>
+
+                              {competition.isMoney ? (
+                                <Text style={styles.competitionStatNumber}>
+                                  {formatCurrency(competition.prizePool)}
+                                </Text>
+                              ) : (
+                                <Text style={styles.competitionStatNumber}>
+                                  {competition.reward}
+                                </Text>
+                              )}
+
+                              <Text style={styles.competitionStatLabel}>Prize Pool</Text>
+                            </View>
+                          </View>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.joinButton,
+                              competition.status === 'finished' && styles.joinButtonDisabled,
+                              isJoining === competition.id && styles.joinButtonDisabled,
+                            ]}
+                            onPress={() =>
+                              competition.userJoined
+                                ? goToCompetition(competition.id)
+                                : handleJoinCompetition(competition.id)
+                            }
+                            disabled={isJoining === competition.id}
+                          >
+                            {isJoining === competition.id ? (
+                              <>
+                                <Ionicons
+                                  name="hourglass"
+                                  size={20}
+                                  color="#FFFFFF"
+                                  style={styles.buttonIcon}
+                                />
+                                <Text style={styles.joinButtonText}>Joining...</Text>
+                              </>
+                            ) : competition.userJoined && competition.status !== 'finished' ? (
+                              <>
+                                <Ionicons
+                                  name="arrow-forward"
+                                  size={20}
+                                  color="#FFFFFF"
+                                  style={styles.buttonIcon}
+                                />
+                                <Text style={styles.joinButtonText}>
+                                  Joined - View Competition
+                                </Text>
+                              </>
+                            ) : competition.userJoined ? (
+                              <>
+                                <Ionicons
+                                  name="information-circle-outline"
+                                  size={20}
+                                  color="#FFFFFF"
+                                  style={styles.buttonIcon}
+                                />
+                                <Text style={styles.joinButtonText}>Ended - View Competition</Text>
+                              </>
+                            ) : competition.status === 'finished' ? (
+                              <>
+                                <Ionicons
+                                  name="close-circle"
+                                  size={20}
+                                  color="#FFFFFF"
+                                  style={styles.buttonIcon}
+                                />
+                                <Text style={styles.joinButtonText}>Competition Ended</Text>
+                              </>
+                            ) : (
+                              <>
+                                <Ionicons
+                                  name="add-circle"
+                                  size={20}
+                                  color="#FFFFFF"
+                                  style={styles.buttonIcon}
+                                />
+                                <Text style={styles.joinButtonText}>Join Competition</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+
+                      <TouchableOpacity
+                        style={styles.collapseButton}
+                        onPress={() => setCollapseFinished((prev) => !prev)}
+                      >
+                        <Ionicons
+                          name={collapseFinished ? 'chevron-down' : 'chevron-up'}
+                          size={20}
+                          color="#FFFFFF"
+                          style={styles.buttonIcon}
+                        />
+                        <Text style={styles.collapseButtonText}>
+                          {collapseFinished
+                            ? 'Show Finished Competitions'
+                            : 'Hide Finished Competitions'}
+                        </Text>
+                      </TouchableOpacity>
+                      
+                      {!collapseFinished &&
+                        finishedCompetitions.map((competition) => (
+                          <View key={competition.id} style={styles.competitionContainer}>
+                            <View style={styles.competitionHeader}>
+                              <Text style={styles.competitionTitle}>{competition.name}</Text>
+                              <View
+                                style={[
+                                  styles.statusTag,
+                                  {
+                                    backgroundColor: `${getStatusColor(competition.status)}20`,
+                                  },
+                                ]}
+                              >
+                                <Ionicons
+                                  name={getStatusIcon(competition.status) as any}
+                                  size={20}
+                                  color={getStatusColor(competition.status)}
+                                />
+                                <Text
+                                  style={[
+                                    styles.statusTagText,
+                                    { color: getStatusColor(competition.status) },
+                                  ]}
+                                >
+                                  {competition.status.toUpperCase()}
+                                </Text>
+                              </View>
+                            </View>
+
+                            <Text style={styles.dateRange}>
+                              {formatDateRange(competition.dates.start, competition.dates.end)}
+                            </Text>
+
+                            <View style={styles.competitionStatsContainer}>
+                              <View style={styles.competitionStatBox}>
+                                <View style={styles.competitionIconContainer}>
+                                  <Ionicons name="people" size={24} color={strongColor} />
+                                </View>
+                                <Text style={styles.competitionStatNumber}>
+                                  {competition.participants.toLocaleString()}
+                                </Text>
+                                <Text style={styles.competitionStatLabel}>Users</Text>
+                              </View>
+
+                              <View style={styles.competitionStatBox}>
+                                <View style={styles.competitionIconContainer}>
+                                  <Ionicons name="cash" size={24} color={strongColor} />
+                                </View>
+
+                                {competition.isMoney ? (
+                                  <Text style={styles.competitionStatNumber}>
+                                    {formatCurrency(competition.prizePool)}
+                                  </Text>
+                                ) : (
+                                  <Text style={styles.competitionStatNumber}>
+                                    {competition.reward}
+                                  </Text>
+                                )}
+
+                                <Text style={styles.competitionStatLabel}>Prize Pool</Text>
+                              </View>
+                            </View>
+
+                            <TouchableOpacity
+                              style={[
+                                styles.joinButton,
+                                competition.status === 'finished' && styles.joinButtonDisabled,
+                                isJoining === competition.id && styles.joinButtonDisabled,
+                              ]}
+                              onPress={() =>
+                                competition.userJoined
+                                  ? goToCompetition(competition.id)
+                                  : handleJoinCompetition(competition.id)
+                              }
+                              disabled={isJoining === competition.id}
+                            >
+                              {isJoining === competition.id ? (
+                                <>
+                                  <Ionicons
+                                    name="hourglass"
+                                    size={20}
+                                    color="#FFFFFF"
+                                    style={styles.buttonIcon}
+                                  />
+                                  <Text style={styles.joinButtonText}>Joining...</Text>
+                                </>
+                              ) : competition.userJoined &&
+                                competition.status !== 'finished' ? (
+                                <>
+                                  <Ionicons
+                                    name="arrow-forward"
+                                    size={20}
+                                    color="#FFFFFF"
+                                    style={styles.buttonIcon}
+                                  />
+                                  <Text style={styles.joinButtonText}>
+                                    Joined - View Competition
+                                  </Text>
+                                </>
+                              ) : competition.userJoined ? (
+                                <>
+                                  <Ionicons
+                                    name="information-circle-outline"
+                                    size={20}
+                                    color="#FFFFFF"
+                                    style={styles.buttonIcon}
+                                  />
+                                  <Text style={styles.joinButtonText}>
+                                    Ended - View Competition
+                                  </Text>
+                                </>
+                              ) : competition.status === 'finished' ? (
+                                <>
+                                  <Ionicons
+                                    name="close-circle"
+                                    size={20}
+                                    color="#FFFFFF"
+                                    style={styles.buttonIcon}
+                                  />
+                                  <Text style={styles.joinButtonText}>Competition Ended</Text>
+                                </>
+                              ) : (
+                                <>
+                                  <Ionicons
+                                    name="add-circle"
+                                    size={20}
+                                    color="#FFFFFF"
+                                    style={styles.buttonIcon}
+                                  />
+                                  <Text style={styles.joinButtonText}>Join Competition</Text>
+                                </>
+                              )}
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                    </View>
+                  )}
+                </Animated.View>
+              </View>
+
+              <Animated.View style={[getAnimatedStyle(statsAnimation), styles.userStatsContainer]}>
+                <Text style={styles.userStatsTitle}>Your Stats</Text>
+
+                <View style={styles.statsGrid}>
+                  {userStats.map((stat) => (
+                    <View key={stat.id} style={styles.statCard}>
+                      <View style={styles.statIconContainer}>
+                        <Ionicons name={stat.icon as any} size={24} color={stat.color} />
+                      </View>
+                      <Text style={styles.statValue}>{stat.value}</Text>
+                      <Text style={styles.statTitle}>{stat.title}</Text>
+                    </View>
+                  ))}
+                </View>
+              </Animated.View>
+            </>
+          )}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const resetStyles = StyleSheet.create({
+  container: {
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  resetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2A2A2A',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FF4444',
+    gap: 8,
+  },
+  resetText: {
+    fontFamily: defFontType,
+    color: '#FF4444',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
+
+const styles = StyleSheet.create({
+  weeklyScrollView: {
+    marginHorizontal: -4,
+  },
+  weeklyProgressRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 4,
+  },
+  dayCard: {
+    backgroundColor: lbgColor,
+    borderRadius: 12,
+    padding: 12,
+    marginHorizontal: 4,
+    alignItems: 'center',
+    minWidth: 80,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  todayCard: {
+    borderColor: strongColor,
+    backgroundColor: l2bgColor,
+  },
+  incompleteTodayCard: {
+    borderColor: strongColor,
+    backgroundColor: l2bgColor,
+  },
+  dayLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: strongColor,
+    marginBottom: 8,
+    fontFamily: defFontType,
+  },
+  incompleteDayLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#B0B0B0',
+    marginBottom: 8,
+    fontFamily: defFontType,
+  },
+  todayText: {
+    color: strongColor,
+    fontFamily: defFontType,
+  },
+  pointsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  dayPoints: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: strongColor,
+    marginLeft: 4,
+    fontFamily: defFontType,
+  },
+  incompleteDayPoints: {
+    color: '#666',
+    fontFamily: defFontType,
+  },
+  timeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  lastPutDownTime: {
+    fontSize: 12,
+    color: strongColor,
+    marginLeft: 4,
+    fontWeight: '500',
+    fontFamily: defFontType,
+  },
+  incompleteTime: {
+    color: '#666',
+    fontFamily: defFontType,
+  },
+  scrollArrowButton: {
+    position: 'absolute',
+    top: '50%',
+    backgroundColor: dbgColor,
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+    marginTop: -5,
+  },
+  leftArrow: {
+    left: 16,
+  },
+  rightArrow: {
+    right: 16,
+  },
+  weeklyProgressWrapper: {
+    backgroundColor: dbgColor,
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    position: 'relative',
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginBottom: 16,
+    fontFamily: defFontType,
+  },
+  weeklyProgressContainer: {
+    marginBottom: 30,
+  },
+  warmFont: {
+    fontFamily: warmFontType,
+  },
+  container: {
+    flex: 1,
+    backgroundColor: bgColor,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontFamily: defFontType,
+    color: '#FFFFFF',
+    fontSize: 16,
+    marginTop: 16,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  content: {
+    padding: 20,
+    paddingTop: 40,
+  },
+  welcomeText: {
+    fontSize: 42,
+    fontWeight: '300',
+    color: '#FFFFFF',
+    marginBottom: 40,
+    textAlign: 'center',
+  },
+  username: {
+    fontWeight: '600',
+    color: strongColor,
+  },
+  statusBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 20,
+    fontFamily: defFontType,
+  },
+  statusText: {
+    fontFamily: defFontType,
+    color: '#10B981',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  competitionsContainer: {
+    marginBottom: 30,
+  },
+  competitionsTitle: {
+    fontFamily: defFontType,
+    fontSize: 20,
+    fontWeight: '600',
+    letterSpacing: 3,
+    color: '#FFFFFF',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  noCompetitionsContainer: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
+    padding: 40,
+    alignItems: 'center',
+  },
+  noCompetitionsText: {
+    fontFamily: defFontType,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  noCompetitionsSubtext: {
+    fontFamily: defFontType,
+    fontSize: 14,
+    color: '#B0B0B0',
+    textAlign: 'center',
+  },
+  competitionContainer: {
+    backgroundColor: lbgColor,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  competitionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  competitionTitle: {
+    fontFamily: defFontType,
+    letterSpacing: 0,
+    fontSize: 18,
+    color: '#FFFFFF',
+    flex: 1,
+  },
+  statusTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusTagText: {
+    fontFamily: defFontType,
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 4,
+    letterSpacing: 0.5,
+  },
+  compId: {
+    fontSize: 14,
+    color: '#B0B0B0',
+    fontFamily: defFontType,
+  },
+  dateRange: {
+    fontSize: 14,
+    color: '#B0B0B0',
+    fontFamily: defFontType,
+    marginBottom: 20,
+  },
+  competitionStatsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  competitionStatBox: {
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: 8,
+  },
+  competitionIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(157, 78, 221, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  competitionStatNumber: {
+    fontFamily: defFontType,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  competitionStatLabel: {
+    fontFamily: defFontType,
+    fontSize: 12,
+    color: '#B0B0B0',
+    textAlign: 'center',
+  },
+  joinButton: {
+    backgroundColor: l2bgColor,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: strongColor,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: strongColor,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  joinButtonDisabled: {
+    backgroundColor: l2bgColor,
+    borderWidth: 0,
+    shadowOpacity: 0,
+  },
+  collapseButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: l2bgColor,
+    borderRadius: 12,
+    padding: 8,
+    flexDirection: 'row',
+    elevation: 5,
+    marginBottom: 16,
+  },
+  theButton: {
+    backgroundColor: strongColor,
+    borderRadius: 24,
+    padding: 12,
+    flexDirection: 'row',
+    elevation: 5,
+    marginBottom: 16,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonIcon: {
+    marginRight: 8,
+  },
+  joinButtonText: {
+    fontFamily: defFontType,
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  collapseButtonText: {
+    fontFamily: defFontType,
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  theButtonText: {
+    fontFamily: defFontType,
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  userStatsContainer: {
+    marginBottom: 30,
+  },
+  userStatsTitle: {
+    fontFamily: defFontType,
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  statCard: {
+    width: '48%',
+    backgroundColor: l3bgColor,
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  statIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(157, 78, 221, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  statValue: {
+    fontFamily: defFontType,
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  statTitle: {
+    fontFamily: defFontType,
+    fontSize: 12,
+    color: '#B0B0B0',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  resetContainer: {
+    marginTop: 20,
+    marginBottom: 40,
+  },
+});

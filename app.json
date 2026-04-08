@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "beddr",
+    "slug": "beddr",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/beddrIcon.png",
+    "scheme": "beddr",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dmao.beddr",
+      "googleServicesFile": "./ios/beddr/GoogleService-Info.plist",
+      "useFrameworks": "dynamic"
+    },
+    "android": {
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/beddrAdaptiveForeground.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.dmao.beddr"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/beddrIcon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/beddrSplash.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.188667592970-h4hmpdbimh2ghdv49srbcmoun8h670g7"
+        }
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      "react-native-health",
+  
+      ["expo-build-properties", { "ios": { "useFrameworks": "dynamic" } }]
+
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

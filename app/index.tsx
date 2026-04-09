@@ -15,6 +15,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  AppState,
+  AppStateStatus,
   NativeScrollEvent,
   NativeSyntheticEvent,
   SafeAreaView,
@@ -54,19 +56,23 @@ interface UserProfile {
   competitions: [];
 }
 
+interface Player {
+  id: number;
+  name: string;
+  points: number;
+}
+
 interface Competition {
   id: string;
-  dates: {
-    start: string;
-    end: string;
-  };
-  status: 'ongoing' | 'upcoming' | 'finished';
-  participants: number;
-  prizePool: number;
-  reward: string;
-  isMoney: boolean;
-  userJoined: boolean;
   name: string;
+
+  start: number;
+  end: number;
+  status: 'ongoing' | 'upcoming' | 'finished';
+  players: Player[];
+  reward: string;
+  userJoined: boolean;
+  
 }
 
 type DayProgress = {
@@ -99,7 +105,7 @@ export default function HomeScreen() {
   });
 
   const [collapseFinished, setCollapseFinished] = useState(true);
-  const [theButtonPressed, setTheButtonPressed] = useState(true);
+  const [theButtonPressed, setTheButtonPressed] = useState(false);
   
   const navigation = useNavigation<any>();
 
@@ -147,7 +153,7 @@ export default function HomeScreen() {
   };
 
   const getTodayIndex = () => new Date().getDay();
-  const recordSleepEvent = async (lockedIn: boolean) => {
+  const recordEvent = async (lockedIn: boolean) => {
     if(!uid) return;
 
     const newEvent: SleepEvent = {
@@ -158,43 +164,9 @@ export default function HomeScreen() {
     const profileRef = doc(firestore, 'profiledb', uid);
     await updateDoc(profileRef, {SleepEvents: arrayUnion(newEvent),});
   };
-  const calculatePointsFromWeektime = (weekTimeValue: number) => {
-    if (weekTimeValue < 0) return 0;
+  
 
-    const fivePM = 17 * 60;
-    const ninePM = 21 * 60;
-    const totalDuration = 6 * 60;
-
-    let timeFromNinePM: number;
-
-    if (weekTimeValue >= ninePM) {
-      timeFromNinePM = weekTimeValue - ninePM;
-    } else if (weekTimeValue >= fivePM) {
-      return 30;
-    } else {
-      timeFromNinePM = 24 * 60 - ninePM + weekTimeValue;
-    }
-
-    if (timeFromNinePM <= totalDuration) {
-      return Math.max(
-        0,
-        Math.round(30 * (1 - timeFromNinePM / totalDuration) * 1000) / 1000
-      );
-    }
-
-    return 0;
-  };
-
-  const formatTimeFromMinutes = (weekTimeValue: number) => {
-    if (weekTimeValue < 0) return '--';
-
-    const hours = Math.floor(weekTimeValue / 60);
-    const minutes = Math.floor(weekTimeValue % 60);
-
-    return `${hours === 0 ? 12 : hours > 12 ? (hours > 24 ? hours - 24 : hours - 12) : hours}:${minutes
-      .toString()
-      .padStart(2, '0')} ${hours >= 12 && hours < 24 ? 'PM' : 'AM'}`;
-  };
+  
 
   const convertWeektimesToProgressData = (weektimes: number[]) => {
     const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -202,8 +174,8 @@ export default function HomeScreen() {
       const weekTimeValue = weektimes?.[index] ?? -1;
       return {
         day,
-        points: calculatePointsFromWeektime(weekTimeValue),
-        lastPutDown: formatTimeFromMinutes(weekTimeValue),
+        points : 0, //: calculatePointsFromWeektime(weekTimeValue),
+        lastPutDown : 0, //: formatTimeFromMinutes(weekTimeValue),
       };
     });
   };
@@ -284,13 +256,7 @@ export default function HomeScreen() {
     }, staggerDelay * 5);
   };
 
-  const minutesToTime = (minutes: number): string => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    const displayHours = hours > 12 ? hours - 12 : hours === 0 ? 12 : hours;
-    const period = hours >= 12 ? 'PM' : 'AM';
-    return `${displayHours}:${mins.toString().padStart(2, '0')} ${period}`;
-  };
+  
 
   const calculateStats = (profileData: UserProfile) => {
     if (!profileData?.pastcomps) {
@@ -308,12 +274,11 @@ export default function HomeScreen() {
     const weeksPlayed = pastComps.length;
     const bestRank =
       pastComps.length > 0 ? Math.min(...pastComps.map((comp) => comp.rank)) : 'N/A';
-    const averageBedtime =
-      profileData.avgbedtime >= 0 ? minutesToTime(profileData.avgbedtime) : 'N/A';
+    
 
     return {
       totalWins,
-      averageBedtime,
+      averageBedtime: 'N/A', // Placeholder, as calculating average bedtime requires more complex logic
       weeksPlayed,
       bestRank: bestRank === 'N/A' ? 'N/A' : `#${bestRank}`,
     };
@@ -325,63 +290,78 @@ export default function HomeScreen() {
       isFirstRender.current = false;
       return;
     }
-    recordSleepEvent(theButtonPressed);
+    recordEvent(theButtonPressed);
   }, [theButtonPressed]);
-  const getCompetitionStatus = (
-    startDate: string,
-    endDate: string
-  ): 'ongoing' | 'upcoming' | 'finished' => {
-    const now = new Date();
 
-    const parseLocalDate = (dateStr: string) => {
-      const [year, month, day] = dateStr.split('-').map(Number);
-      return new Date(year, month - 1, day);
+  const appStateRef = useRef(AppState.currentState);
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      const prevState = appStateRef.current;
+      appStateRef.current = nextAppState;
+
+      // Only fire if coming FROM active (not from inactive like a phone call)
+      if (nextAppState === 'background') {
+        setTheButtonPressed(false);
+      }
     };
 
-    const start = parseLocalDate(startDate);
-    const end = parseLocalDate(endDate);
-    end.setHours(23, 59, 59, 999);
+   const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [uid, theButtonPressed]);
+
+  // useEffect(() => {
+  //   const unsub = onAuthStateChanged(auth, (user) => {
+  //     setUid(user?.uid ?? null);
+  //     setAuthReady(true);
+      
+  //     // Lock out on every app open (auth resolves on launch)
+  //     if (user?.uid) {
+  //       const lockOutEvent: SleepEvent = {
+  //         timestamp: Date.now(),
+  //         lockedIn: false,
+  //       };
+  //       const profileRef = doc(firestore, 'profiledb', user.uid);
+  //       updateDoc(profileRef, { SleepEvents: arrayUnion(lockOutEvent) });
+  //     }
+  //   });
+  //   return unsub;
+  // }, []);
+
+  const getCompetitionStatus = (start : number, end : number)
+  : 'ongoing' | 'upcoming' | 'finished' => {
+    const now = Date.now();
 
     if (now < start) return 'upcoming';
     if (now > end) return 'finished';
     return 'ongoing';
   };
 
-  const calculatePrizePool = (participantCount: number, isMoney: boolean): number => {
-    if (!isMoney) return 0;
-    return participantCount * 5;
-  };
-
   const processCompetitionsData = (snapshot: any) => {
     const competitionsData: Competition[] = [];
 
     snapshot.forEach((docSnap: any) => {
-      const data = docSnap.data();
+      const cur = docSnap.data();
 
-      if (!data?.dates?.start || !data?.dates?.end) return;
-      if (!data?.players || typeof data.players !== 'object') return;
+      if (!cur?.start || !cur?.end) return;
+      if (!cur?.players || typeof cur.players !== 'object') return;
 
-      const playerUids = Object.keys(data.players);
-      const participantCount = playerUids.length;
+      const playerUids = Object.keys(cur.players);
+      const playerCount = playerUids.length;
 
       const myUid = uid;
-      const myPlayerEntry = myUid ? data.players?.[myUid] : null;
+      const myPlayerEntry = myUid ? cur.players?.[myUid] : null;
 
       const userJoined = !!myPlayerEntry;
-      const isMoney = data.reward === 'money';
 
       const competition: Competition = {
         id: docSnap.id,
-        dates: {
-          start: data.dates.start,
-          end: data.dates.end,
-        },
-        status: getCompetitionStatus(data.dates.start, data.dates.end),
-        participants: participantCount,
-        name: data.name ?? '(Untitled)',
-        reward: data.reward,
-        isMoney,
-        prizePool: calculatePrizePool(participantCount, isMoney),
+        start: cur.start,
+        end: cur.end,
+        
+        status: getCompetitionStatus(cur.start, cur.end),
+        players: cur.players,
+        name: cur.name ?? "Untitled Game",
+        reward: cur.reward,
         userJoined,
       };
 
@@ -395,7 +375,7 @@ export default function HomeScreen() {
         finished: 2,
       };
       if (a.status !== b.status) return statusOrder[a.status] - statusOrder[b.status];
-      return new Date(a.dates.start).getTime() - new Date(b.dates.start).getTime();
+      return new Date(a.start).getTime() - new Date(b.start).getTime();
     });
 
     return competitionsData;
@@ -444,8 +424,8 @@ export default function HomeScreen() {
           const profileData = docSnapshot.data() as UserProfile;
           setUserProfile(profileData);
 
-          const weektimes = buildWeektimesFromSleepTimes(profileData.sleepTimes);
-          setWeeklyProgress(convertWeektimesToProgressData(weektimes));
+          //const weektimes = buildWeektimesFromSleepTimes(profileData.sleepTimes);
+          //setWeeklyProgress(convertWeektimesToProgressData(weektimes));
           setStats(calculateStats(profileData));
         } else {
           console.log('User profile not found for uid:', uid);
@@ -575,15 +555,10 @@ export default function HomeScreen() {
     }).format(amount);
   };
 
-  const formatDateRange = (startDate: string, endDate: string) => {
-    const parseLocalDate = (dateStr: string) => {
-      const [year, month, day] = dateStr.split('-').map(Number);
-      return new Date(year, month - 1, day);
-    };
-
-    const start = parseLocalDate(startDate);
-    const end = parseLocalDate(endDate);
-
+  const formatDateRange = (startDate: number, endDate: number) => {
+    const start = new Date(startDate * 1000);
+    const end = new Date(endDate * 1000);
+    
     const startFormatted = start.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -896,7 +871,7 @@ export default function HomeScreen() {
                           </View>
 
                           <Text style={styles.dateRange}>
-                            {formatDateRange(competition.dates.start, competition.dates.end)}
+                            {formatDateRange(competition.start, competition.end)}
                           </Text>
 
                           <View style={styles.competitionStatsContainer}>
@@ -905,7 +880,7 @@ export default function HomeScreen() {
                                 <Ionicons name="people" size={24} color={strongColor} />
                               </View>
                               <Text style={styles.competitionStatNumber}>
-                                {competition.participants.toLocaleString()}
+                                {competition.players.toLocaleString()}
                               </Text>
                               <Text style={styles.competitionStatLabel}>Users</Text>
                             </View>
@@ -915,15 +890,11 @@ export default function HomeScreen() {
                                 <Ionicons name="cash" size={24} color={strongColor} />
                               </View>
 
-                              {competition.isMoney ? (
-                                <Text style={styles.competitionStatNumber}>
-                                  {formatCurrency(competition.prizePool)}
-                                </Text>
-                              ) : (
-                                <Text style={styles.competitionStatNumber}>
-                                  {competition.reward}
-                                </Text>
-                              )}
+                              
+                              <Text style={styles.competitionStatNumber}>
+                                {competition.reward}
+                              </Text>
+                              
 
                               <Text style={styles.competitionStatLabel}>Prize Pool</Text>
                             </View>
@@ -1046,7 +1017,7 @@ export default function HomeScreen() {
                             </View>
 
                             <Text style={styles.dateRange}>
-                              {formatDateRange(competition.dates.start, competition.dates.end)}
+                              {formatDateRange(competition.start, competition.end)}
                             </Text>
 
                             <View style={styles.competitionStatsContainer}>
@@ -1055,7 +1026,7 @@ export default function HomeScreen() {
                                   <Ionicons name="people" size={24} color={strongColor} />
                                 </View>
                                 <Text style={styles.competitionStatNumber}>
-                                  {competition.participants.toLocaleString()}
+                                  {competition.players.toLocaleString()}
                                 </Text>
                                 <Text style={styles.competitionStatLabel}>Users</Text>
                               </View>
@@ -1065,15 +1036,12 @@ export default function HomeScreen() {
                                   <Ionicons name="cash" size={24} color={strongColor} />
                                 </View>
 
-                                {competition.isMoney ? (
-                                  <Text style={styles.competitionStatNumber}>
-                                    {formatCurrency(competition.prizePool)}
-                                  </Text>
-                                ) : (
-                                  <Text style={styles.competitionStatNumber}>
-                                    {competition.reward}
-                                  </Text>
-                                )}
+                                
+                                
+                                <Text style={styles.competitionStatNumber}>
+                                  {competition.reward}
+                                </Text>
+                                
 
                                 <Text style={styles.competitionStatLabel}>Prize Pool</Text>
                               </View>

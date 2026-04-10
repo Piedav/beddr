@@ -19,13 +19,13 @@ import {
   AppStateStatus,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, firestore } from '../firebase';
 import { useUser } from './_layout';
 
@@ -91,7 +91,7 @@ export default function HomeScreen() {
   const [scrollViewWidth, setScrollViewWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
-
+  
   const [stats, setStats] = useState<{
     totalWins: number;
     averageBedtime: string;
@@ -286,16 +286,32 @@ export default function HomeScreen() {
   const theButtonPressedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
 
+
+
   useEffect(() => {
     console.log('AppState effect registered'); 
-
+    let lastBackgroundTime: number | null = null;
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       const prevState = appStateRef.current;
       console.log('AppState:', prevState, '->', nextAppState);
       appStateRef.current = nextAppState;
+      if(nextAppState === 'inactive') {
+        lastBackgroundTime = Date.now();
+      }
+      let isLockScreen: boolean = true;
+      if (nextAppState === 'background' && lastBackgroundTime) {
+        const elapsed = Date.now() - lastBackgroundTime;
+
+        if (elapsed < 300) {
+          console.log('Probably lock screen'); //around 40-60
+        } else {
+          console.log('Probably home screen / app switch'); //around 600-700
+          isLockScreen = false;
+        }
+      }
 
       // User explicitly left the app: active -> background directly (no inactive step)
-      if (prevState === 'active' && nextAppState === 'background') {
+      if (isLockScreen === false) {
         theButtonPressedRef.current = false;
         setTheButtonPressed(false);
         recordEvent(false);
@@ -824,21 +840,7 @@ export default function HomeScreen() {
                         : 'Lock In'}
                     </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ padding: 10, backgroundColor: 'red', margin: 10 }}
-                    onPress={() => {
-                      const prevState = appStateRef.current;
-                      appStateRef.current = 'background';
-                      console.log('Simulating AppState:', prevState, '-> background');
-                      if (prevState === 'active') {
-                        theButtonPressedRef.current = false;
-                        setTheButtonPressed(false);
-                        recordEvent(false);
-                      }
-                    }}
-                  >
-                    <Text style={{ color: 'white' }}>Simulate Background</Text>
-                  </TouchableOpacity>
+                  
                 </Animated.View>
 
 

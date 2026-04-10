@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "188667592970",
+    "project_id": "beddr-7eebe",
+    "storage_bucket": "beddr-7eebe.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:188667592970:android:c1fd7dda2afea8ed75faf3",
+        "android_client_info": {
+          "package_name": "com.dmao.beddr"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "188667592970-pqibr6gst62n594fu8rn7bg9ecnjailo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDSoUJDtMxQY0FkcCeDK1pnQVvCEocsqNI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "188667592970-pqibr6gst62n594fu8rn7bg9ecnjailo.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "188667592970-h4hmpdbimh2ghdv49srbcmoun8h670g7.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.dmao.beddr"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

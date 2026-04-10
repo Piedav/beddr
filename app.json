@@ -48,7 +48,6 @@
       ],
       "@react-native-firebase/app",
       "@react-native-firebase/auth",
-      "react-native-health",
   
       ["expo-build-properties", { "ios": { "useFrameworks": "dynamic" } }]
 

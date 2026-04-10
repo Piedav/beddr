@@ -2,9 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebase';
+import { Alert, Animated, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { firestore } from '../firebase';
 import { useUser } from './_layout';
+
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const dbgColor = "#0a0513ff"; //dark background
 const bgColor = "#111124ff"; //background
@@ -108,7 +110,6 @@ function sumPointsForRange(
 }
 
 export async function updateAllCompetitions(uid: string, date: string) {
-  const firestore = db;
 
   // read profile once (to recompute totals)
   const profileRef = doc(firestore, "profiledb", uid);
@@ -147,7 +148,6 @@ export async function updateAllCompetitions(uid: string, date: string) {
 }
 
 export default function logScreen() {
-  const firestore = db;
   const { userData } = useUser();
 
   const [updating, setUpdating] = useState(false);

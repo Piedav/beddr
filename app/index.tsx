@@ -283,31 +283,28 @@ export default function HomeScreen() {
       bestRank: bestRank === 'N/A' ? 'N/A' : `#${bestRank}`,
     };
   };
-  const isFirstRender = useRef(true);
-
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    recordEvent(theButtonPressed);
-  }, [theButtonPressed]);
-
+  const theButtonPressedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
+
   useEffect(() => {
+    console.log('AppState effect registered'); 
+
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       const prevState = appStateRef.current;
+      console.log('AppState:', prevState, '->', nextAppState);
       appStateRef.current = nextAppState;
 
-      // Only fire if coming FROM active (not from inactive like a phone call)
-      if (nextAppState === 'background') {
+      // User explicitly left the app: active -> background directly (no inactive step)
+      if (prevState === 'active' && nextAppState === 'background') {
+        theButtonPressedRef.current = false;
         setTheButtonPressed(false);
+        recordEvent(false);
       }
     };
 
-   const subscription = AppState.addEventListener('change', handleAppStateChange);
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription.remove();
-  }, [uid, theButtonPressed]);
+  }, []);
 
   // useEffect(() => {
   //   const unsub = onAuthStateChanged(auth, (user) => {
@@ -808,7 +805,12 @@ export default function HomeScreen() {
         {/* This is the button that toggles giving points and whanot*/}
                   <TouchableOpacity
                     style={styles.theButton}
-                    onPress={() => setTheButtonPressed((prev) => !prev)}
+                    onPress={() => {
+                      const next = !theButtonPressedRef.current;
+                      theButtonPressedRef.current = next;
+                      setTheButtonPressed(next);
+                      recordEvent(next);
+                    }}
                   >
                     <Ionicons
                       name={theButtonPressed ? 'lock-closed-outline' : 'lock-open-outline'}
@@ -822,7 +824,21 @@ export default function HomeScreen() {
                         : 'Lock In'}
                     </Text>
                   </TouchableOpacity>
-
+                  <TouchableOpacity
+                    style={{ padding: 10, backgroundColor: 'red', margin: 10 }}
+                    onPress={() => {
+                      const prevState = appStateRef.current;
+                      appStateRef.current = 'background';
+                      console.log('Simulating AppState:', prevState, '-> background');
+                      if (prevState === 'active') {
+                        theButtonPressedRef.current = false;
+                        setTheButtonPressed(false);
+                        recordEvent(false);
+                      }
+                    }}
+                  >
+                    <Text style={{ color: 'white' }}>Simulate Background</Text>
+                  </TouchableOpacity>
                 </Animated.View>
 
 

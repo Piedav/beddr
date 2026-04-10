@@ -307,15 +307,13 @@ export default function HomeScreen() {
         } else {
           console.log('Probably home screen / app switch'); //around 600-700
           isLockScreen = false;
+          theButtonPressedRef.current = false;
+          setTheButtonPressed(false);
+          recordEvent(false);
         }
       }
 
-      // User explicitly left the app: active -> background directly (no inactive step)
-      if (isLockScreen === false) {
-        theButtonPressedRef.current = false;
-        setTheButtonPressed(false);
-        recordEvent(false);
-      }
+      
     };
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);

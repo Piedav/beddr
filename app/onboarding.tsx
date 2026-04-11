@@ -7,9 +7,10 @@ import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Alert, Animated, Dimensions, KeyboardAvoidingView, Platform, SafeAreaView,
+  Alert, Animated, Dimensions, KeyboardAvoidingView, Platform,
   ScrollView, StyleSheet, Text, TouchableOpacity, View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, firestore } from '../firebase'; // adjust path
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -40,7 +41,7 @@ interface User {
 }
 
 
-export default function OnboardingScreen({ onComplete }) {
+export default function OnboardingScreen({ onComplete }: { onComplete: (data: { user: User; bedtime: string; wakeTime: string; notifications: boolean }) => void }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [user, setUser] = useState<User | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);

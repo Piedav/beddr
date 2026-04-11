@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { arrayUnion, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebase'; // adjust path if needed
+import { firestore } from '../firebase';
 import { useUser } from './_layout';
 
 const dbgColor = "#0a0513ff"; //dark background
@@ -34,7 +34,6 @@ function isYYYYMMDD(s: string) {
 
 
 export default function CompetitionCodesScreen() {
-  const firestore = db;
   const { userData } = useUser();
 
   const [joinCode, setJoinCode] = useState('');
@@ -131,7 +130,7 @@ export default function CompetitionCodesScreen() {
     );
 
     // add competition code to user's profile list
-    const profileRef = doc(db, 'profiledb', userData.uid);
+    const profileRef = doc(firestore, 'profiledb', userData.uid);
     try {
       await updateDoc(profileRef, { competitions: arrayUnion(code) });
     } catch {

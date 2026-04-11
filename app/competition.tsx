@@ -3,7 +3,7 @@ import { useFocusEffect, useRoute } from '@react-navigation/native';
 import { collection, doc, onSnapshot, query, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { firestore as db } from '../firebase';
+import { firestore } from '../firebase';
 import { useUser } from './_layout';
 
 const dbgColor = "#0a0513ff"; //dark background
@@ -29,8 +29,6 @@ export default function CompetitionScreen() {
   const [currentCompetitionId, setCurrentCompetitionId] = useState(null);
   const [allCompetitions, setAllCompetitions] = useState({});
   const scrollViewRef = React.useRef(null);
-  
-  const firestore = db;
 
   const [currentRank, setCurrentRank] = useState(0);
   const [totalUsers, setTotalUsers] = useState(0);
@@ -118,7 +116,7 @@ export default function CompetitionScreen() {
     }, staggerDelay * 4);
   };
 
-  const getAnimatedStyle = (animationValue) => ({
+  const getAnimatedStyle = (animationValue: Animated.Value) => ({
     opacity: animationValue,
     transform: [
       {
@@ -130,13 +128,13 @@ export default function CompetitionScreen() {
     ],
   });
   const updateMyPoints = async (competitionId: string, uid: string, points: number) => {
-    const compRef = doc(db, "competitiondb", competitionId);
+    const compRef = doc(firestore, "competitiondb", competitionId);
 
     await updateDoc(compRef, {
       [`players.${uid}.points`]: points,
     });
   };
-  const findActiveCompetition = (competitions) => {
+  const findActiveCompetition = (competitions: { [s: string]: unknown; } | ArrayLike<unknown>) => {
     const now = new Date();
     const currentDateStr = now.toISOString().split('T')[0];
     

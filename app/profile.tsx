@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { doc, getFirestore, onSnapshot } from '@react-native-firebase/firestore';
 import { useFocusEffect } from '@react-navigation/native';
+import { doc, onSnapshot } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { firestore } from '../firebase';
 import { useUser } from './_layout';
 
 const dbgColor = "#0a0513ff"; //dark background
@@ -99,7 +101,7 @@ export default function ProfileScreen() {
   // Track if this is the initial render to prevent flash
   const [hasInitialized, setHasInitialized] = useState(false);
 
-  const firestore = getFirestore();
+  
 
   // Initialize competition animations
   useEffect(() => {

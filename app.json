@@ -9,16 +9,15 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      
       "supportsTablet": true,
       "bundleIdentifier": "com.dmao.beddr",
-      "googleServicesFile": "./ios/beddr/GoogleService-Info.plist",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "useFrameworks": "dynamic"
     },
     "android": {
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/beddrAdaptiveForeground.png",
+        "foregroundImage": "./assets/images/beddrSplash.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
@@ -46,11 +45,14 @@
           "iosUrlScheme": "com.googleusercontent.apps.188667592970-h4hmpdbimh2ghdv49srbcmoun8h670g7"
         }
       ],
-      "@react-native-firebase/app",
-      "@react-native-firebase/auth",
-  
-      ["expo-build-properties", { "ios": { "useFrameworks": "dynamic" } }]
-
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

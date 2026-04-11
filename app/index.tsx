@@ -567,8 +567,8 @@ export default function HomeScreen() {
   };
 
   const formatDateRange = (startDate: number, endDate: number) => {
-    const start = new Date(startDate * 1000);
-    const end = new Date(endDate * 1000);
+    const start = new Date(startDate);
+    const end = new Date(endDate);
     
     const startFormatted = start.toLocaleDateString('en-US', {
       month: 'short',

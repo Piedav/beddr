@@ -1,14 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
-import {
-  arrayUnion,
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-} from 'firebase/firestore';
+import { LinearGradient } from 'expo-linear-gradient';
+import { arrayUnion, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -16,6 +10,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -29,6 +24,9 @@ import { useUser } from './_layout';
 const bgColor = '#111124ff';
 const lbgColor = '#322f4e81';
 const strongColor = '#cc7bdbff';
+const darkStrongColor = 'rgb(109, 16, 126)';
+const labelColor = 'rgb(180, 180, 188)';
+const placeholderColor = 'rgb(166, 166, 178)';
 const defFontType = 'OpenSansSemiBold';
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -70,8 +68,16 @@ export default function CompetitionCodesScreen() {
   const [creating, setCreating] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
 
+  type WinType = 'number' | 'percentage' | 'team';
   const [competitionName, setCompetitionName] = useState('');
   const [reward, setReward] = useState('');
+  const [winType, setWinType] = useState<WinType>('number');
+  const [winValInput, setWinValInput] = useState('');
+
+  const [scrollY, setScrollY] = useState(0);
+  const [layoutHeight, setLayoutHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+  const showBottomFade = contentHeight > layoutHeight && scrollY + layoutHeight < contentHeight - 8;
 
   const thisWeek = useMemo(() => {
     const today = new Date();
@@ -143,7 +149,7 @@ export default function CompetitionCodesScreen() {
           players: {
             [userData.uid]: {
               points: 0,
-              joinedAt: serverTimestamp(),
+              joinedAt: Date.now(),
             },
           },
         },
@@ -171,7 +177,7 @@ export default function CompetitionCodesScreen() {
         return;
       }
 
-      const finalName = competitionName.trim() || 'Weekly Sleep Competition';
+      const finalName = competitionName.trim() || userData.name + "'s Sleep Competition";
       const finalReward = reward.trim();
 
       if (!finalReward) {
@@ -187,6 +193,31 @@ export default function CompetitionCodesScreen() {
         return;
       }
 
+      
+      const parsedWinVal = parseInt(winValInput, 10);
+      const winVal = isNaN(parsedWinVal) ? 0 : parsedWinVal;
+
+      if(winType === 'number') {
+        if(winVal <= 0) {
+          Alert.alert('Invalid number of winners', 'Please enter a positive number of winners.');
+          return;
+        }
+      }
+      else if(winType === 'percentage') {
+        if(winVal <= 0 || winVal > 100) {
+          Alert.alert('Invalid percentage of winners', 'Please enter a positive number 1-100 for the percentage of winners.');
+          
+          return;
+        }
+      }
+      else if(winType === 'team') {
+        if(winVal <= 0) {
+          Alert.alert('Invalid team point goal', 'Please enter a positive number for the total team point goal.');
+          return;
+        }
+      }
+      
+      
       const code = await ensureUniqueCode();
       const ref = doc(firestore, 'competitiondb', code);
 
@@ -196,6 +227,8 @@ export default function CompetitionCodesScreen() {
         end: endMs,
         reward: finalReward,
         players: {},
+        winType: winType,
+        winVal: winVal,
       };
 
       await setDoc(ref, payload, { merge: true });
@@ -209,7 +242,7 @@ export default function CompetitionCodesScreen() {
     } finally {
       setCreating(false);
     }
-  }, [competitionName, reward, endDate, ensureUniqueCode, joinCompetitionByCode, startDate, userData?.uid]);
+  }, [competitionName, reward, endDate, ensureUniqueCode, joinCompetitionByCode, startDate, userData?.uid, winType, winValInput, userData?.name]);
 
   const joinCompetition = useCallback(async () => {
     try {
@@ -299,152 +332,215 @@ export default function CompetitionCodesScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <Animated.View style={getAnimatedStyle(joinAnimation)}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Join a Competition</Text>
-          <View style={styles.row}>
-            <TextInput
-              value={joinCode}
-              onChangeText={setJoinCode}
-              placeholder="Enter code (e.g. ABC123)"
-              placeholderTextColor="#8E8E93"
-              autoCapitalize="characters"
-              style={[styles.input, styles.rowInput]}
-              textContentType="none"
-              keyboardAppearance="dark"
-            />
-            <TouchableOpacity style={styles.primaryButton} onPress={joinCompetition}>
-              <Ionicons name="log-in-outline" size={18} color="#fff" />
-              <Text style={styles.primaryButtonText}>Join</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.hint}>Ask a friend for their code, paste it here, and tap Join.</Text>
-        </View>
-      </Animated.View>
-
-      <Animated.View style={getAnimatedStyle(createAnimation)}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Create a New Competition</Text>
-
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Competition Name</Text>
-            <TextInput
-              value={competitionName}
-              onChangeText={setCompetitionName}
-              placeholder="ex. Ice Cream Competition"
-              placeholderTextColor="#8E8E93"
-              style={styles.input}
-              textContentType="none"
-              keyboardAppearance="dark"
-              autoCapitalize="none"
-            />
-          </View>
-
-          <View style={styles.iosGroup}>
-            <TouchableOpacity style={styles.iosRow} onPress={() => openPicker('start')} activeOpacity={0.7}>
-              <Text style={styles.iosRowLabel}>Start Date</Text>
-              <View style={styles.iosRowRight}>
-                <Text style={styles.iosRowValue}>{formatShortDate(startDate)}</Text>
-                <Ionicons name="chevron-forward" size={16} color="#8E8E93" />
-              </View>
-            </TouchableOpacity>
-
-            <View style={styles.separator} />
-
-            <TouchableOpacity style={styles.iosRow} onPress={() => openPicker('end')} activeOpacity={0.7}>
-              <Text style={styles.iosRowLabel}>End Date</Text>
-              <View style={styles.iosRowRight}>
-                <Text style={styles.iosRowValue}>{formatShortDate(endDate)}</Text>
-                <Ionicons name="chevron-forward" size={16} color="#8E8E93" />
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.hint}>
-            Competition runs from the start of {formatShortDate(startDate)} to the end of {formatShortDate(endDate)}.
-          </Text>
-
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Reward</Text>
-            <TextInput
-              value={reward}
-              onChangeText={setReward}
-              placeholder="e.g. $20 Gift Card, Bragging Rights, Free Coffee"
-              placeholderTextColor="#8E8E93"
-              style={styles.input}
-              autoCapitalize="none"
-            />
-            <Text style={styles.hint}>This text will be shown as the prize.</Text>
-          </View>
-
-          <TouchableOpacity style={styles.primaryButton} onPress={createCompetition} disabled={creating}>
-            <Ionicons name="sparkles-outline" size={18} color="#fff" />
-            <Text style={styles.primaryButtonText}>{creating ? 'Creating…' : 'Generate Code'}</Text>
-          </TouchableOpacity>
-
-          {generatedCode ? (
-            <View style={styles.codeBox}>
-              <Text style={styles.codeLabel}>Your code</Text>
-              <Text style={styles.codeValue}>{generatedCode}</Text>
-              <Text style={styles.hint}>Share this with friends so they can join.</Text>
-            </View>
-          ) : null}
-        </View>
-      </Animated.View>
-
-      <Modal
-        visible={pickerVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closePicker}
+    <SafeAreaView style={{ flex: 1, backgroundColor: bgColor }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[styles.container, { flexGrow: 1 }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        onLayout={(e) => setLayoutHeight(e.nativeEvent.layout.height)}
+        onContentSizeChange={(_, h) => setContentHeight(h)}
+        onScroll={(e) => setScrollY(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
       >
-        <Pressable style={styles.modalBackdrop} onPress={closePicker} />
-        <View style={styles.sheetWrap}>
-          <View style={styles.sheet}>
-            <View style={styles.sheetGrabber} />
-
-            <View style={styles.sheetHeader}>
-              <TouchableOpacity onPress={closePicker}>
-                <Text style={styles.sheetCancel}>Cancel</Text>
-              </TouchableOpacity>
-
-              <Text style={styles.sheetTitle}>
-                {pickerTarget === 'start' ? 'Start Date' : 'End Date'}
-              </Text>
-
-              <TouchableOpacity onPress={confirmPicker}>
-                <Text style={styles.sheetDone}>Done</Text>
+        <Animated.View style={getAnimatedStyle(joinAnimation)}>
+          <View style={styles.card}>
+            <Text style={styles.title}>Join a Competition</Text>
+            <View style={styles.row}>
+              <TextInput
+                value={joinCode}
+                onChangeText={setJoinCode}
+                placeholder="Enter code (e.g. ABC123)"
+                placeholderTextColor={placeholderColor}
+                autoCapitalize="characters"
+                style={[styles.input, styles.rowInput]}
+                textContentType="none"
+                keyboardAppearance="dark"
+              />
+              <TouchableOpacity style={styles.primaryButton} onPress={joinCompetition}>
+                <Ionicons name="log-in-outline" size={18} color="#fff" />
+                <Text style={styles.primaryButtonText}>Join</Text>
               </TouchableOpacity>
             </View>
+            <Text style={styles.hint}>Ask a friend for their code, paste it here, and tap Join.</Text>
+          </View>
+        </Animated.View>
 
-            <View style={styles.sheetPickerWrap}>
-              <DateTimePicker
-                value={tempPickerDate}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                minimumDate={pickerTarget === 'end' ? startDate : new Date()}
-                onChange={(_, selectedDate) => {
-                  if (selectedDate) setTempPickerDate(selectedDate);
-                }}
-                textColor="white"
-                themeVariant="dark"
-                style={styles.sheetPicker}
+        <Animated.View style={getAnimatedStyle(createAnimation)}>
+          <View style={styles.card}>
+            {generatedCode ? (
+              <View style={styles.codeBox}>
+                <Text style={styles.codeLabel}>Your code</Text>
+                <Text style={styles.codeValue}>{generatedCode}</Text>
+                <Text style={styles.hint}>Share this with friends so they can join.</Text>
+              </View>
+            ) : null}
+            <Text style={styles.title}>Create a New Competition</Text>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Competition Name</Text>
+              <TextInput
+                value={competitionName}
+                onChangeText={setCompetitionName}
+                placeholder="ex. Ice Cream Competition"
+                placeholderTextColor={placeholderColor}
+                style={styles.input}
+                textContentType="none"
+                keyboardAppearance="dark"
+                autoCapitalize="none"
               />
             </View>
+
+            <View style={styles.iosGroup}>
+              <TouchableOpacity style={styles.iosRow} onPress={() => openPicker('start')} activeOpacity={0.7}>
+                <Text style={styles.iosRowLabel}>Start Date</Text>
+                <View style={styles.iosRowRight}>
+                  <Text style={styles.iosRowValue}>{formatShortDate(startDate)}</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#8E8E93" />
+                </View>
+              </TouchableOpacity>
+
+              <View style={styles.separator} />
+
+              <TouchableOpacity style={styles.iosRow} onPress={() => openPicker('end')} activeOpacity={0.7}>
+                <Text style={styles.iosRowLabel}>End Date</Text>
+                <View style={styles.iosRowRight}>
+                  <Text style={styles.iosRowValue}>{formatShortDate(endDate)}</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#8E8E93" />
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.hint}>
+              Competition runs from the start of {formatShortDate(startDate)} {"\n"} to the end of {formatShortDate(endDate)}.
+            </Text>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Winning Reward  (Provided by Non-Winning Competitors)</Text>
+              <TextInput
+                value={reward}
+                onChangeText={setReward}
+                placeholder="e.g. $20 Gift Card, Bragging Rights, Free Coffee"
+                placeholderTextColor={placeholderColor}
+                style={styles.input}
+                autoCapitalize="none"
+              />
+              <View style = {styles.row}>
+                <TouchableOpacity activeOpacity={0.7} style={[styles.multiButton, winType === 'number' && { backgroundColor: strongColor }]} onPress={() => setWinType('number')} >
+                  <Text style={styles.multiButtonText}>Top # Win</Text>
+                </TouchableOpacity>
+                <TouchableOpacity activeOpacity={0.7}style={[styles.multiButton, winType === 'percentage' && { backgroundColor: strongColor }]} onPress={() => setWinType('percentage')} >
+                  
+                  <Text style={styles.multiButtonText}>Top % Win</Text>
+                </TouchableOpacity>
+                <TouchableOpacity activeOpacity={0.7}style={[styles.multiButton, winType === 'team' && { backgroundColor: strongColor }]} onPress={() => setWinType('team')} >
+                  
+                  <Text style={styles.multiButtonText}>Co-op Goal</Text>
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                value={winValInput}
+                onChangeText={(text) => {
+                  const cleaned = text.replace(/[^0-9]/g, '');
+                  setWinValInput(cleaned);
+                }}
+                placeholder={
+                  winType === 'team'
+                    ? 'e.g. 1000 total team points needed to win'
+                    : winType === 'percentage'
+                    ? 'e.g. 25 for top 25% winning'
+                    : 'e.g. 3, for top 3 players winning'
+                }
+                placeholderTextColor={placeholderColor}
+                style={styles.input}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardAppearance="dark"
+                textContentType="none"
+              />
+            </View>
+            <TouchableOpacity style={styles.primaryButton} onPress={createCompetition} disabled={creating}>
+              <Ionicons name="sparkles-outline" size={18} color="#fff" />
+              <Text style={styles.primaryButtonText}>{creating ? 'Creating…' : 'Generate Code'}</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+          
+        </Animated.View>
+        
+        <Modal
+          visible={pickerVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={closePicker}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={closePicker} />
+          <View style={styles.sheetWrap}>
+            <View style={styles.sheet}>
+              <View style={styles.sheetGrabber} />
+
+              <View style={styles.sheetHeader}>
+                <TouchableOpacity onPress={closePicker}>
+                  <Text style={styles.sheetCancel}>Cancel</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.sheetTitle}>
+                  {pickerTarget === 'start' ? 'Start Date' : 'End Date'}
+                </Text>
+
+                <TouchableOpacity onPress={confirmPicker}>
+                  <Text style={styles.sheetDone}>Done</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.sheetPickerWrap}>
+                <DateTimePicker
+                  value={tempPickerDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  minimumDate={pickerTarget === 'end' ? startDate : new Date()}
+                  onChange={(_, selectedDate) => {
+                    if (selectedDate) setTempPickerDate(selectedDate);
+                  }}
+                  textColor="white"
+                  themeVariant="dark"
+                  style={styles.sheetPicker}
+                />
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </ScrollView>
+
+      {showBottomFade && (
+        <LinearGradient
+          colors={[
+            'transparent',
+            'rgba(17,17,36,0.6)',
+            'rgba(17,17,36,0.9)',
+            '#111124'
+          ]}
+          pointerEvents="none"
+          style={styles.bottomFade}
+        />
+      )}
     </SafeAreaView>
+    
   );
 }
 
 const styles = StyleSheet.create({
+  bottomFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 90,
+  },
   container: {
-    flex: 1,
     backgroundColor: bgColor,
     padding: 16,
     gap: 16,
+    paddingBottom: 0,
   },
   card: {
     backgroundColor: lbgColor,
@@ -460,14 +556,16 @@ const styles = StyleSheet.create({
   },
   hint: {
     fontFamily: defFontType,
-    color: '#8E8E93',
+    color: labelColor,
     fontSize: 12,
     lineHeight: 18,
+    textAlign: 'center',
   },
   row: {
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
   input: {
     backgroundColor: '#1C1C1E',
@@ -485,7 +583,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontFamily: defFontType,
-    color: '#8E8E93',
+    color: labelColor,
     fontSize: 12,
     marginBottom: 4,
   },
@@ -505,6 +603,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
   },
+  multiButton: {
+    minHeight: 28,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: darkStrongColor,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  multiButtonText: {
+    fontFamily: defFontType,
+    color: '#fff',
+    fontWeight: '700',
+  },
 
   iosGroup: {
     backgroundColor: '#1C1C1E',
@@ -512,9 +627,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   iosRow: {
-    minHeight: 52,
+    minHeight: 20,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -530,7 +645,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   iosRowValue: {
-    color: '#8E8E93',
+    color: labelColor,
     fontSize: 16,
     fontFamily: defFontType,
   },
@@ -550,7 +665,7 @@ const styles = StyleSheet.create({
   },
   codeLabel: {
     fontFamily: defFontType,
-    color: '#8E8E93',
+    color: labelColor,
     fontSize: 12,
   },
   codeValue: {

@@ -699,7 +699,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={true}>
         <View style={styles.content}>
           {hasInitialized && (
             <>
@@ -827,7 +827,7 @@ export default function HomeScreen() {
                     }}
                   >
                     <Ionicons
-                      name={theButtonPressed ? 'lock-closed-outline' : 'lock-open-outline'}
+                      name={theButtonPressed ? 'lock-closed' : 'lock-open-outline'}
                       size={40}
                       color="#FFFFFF"
                       style={styles.buttonIcon}

@@ -290,6 +290,7 @@ export default function CompetitionCodesScreen() {
             [userData.uid]: {
               points: 0,
               joinedAt: Date.now(),
+              name: userData.name,
             },
           },
         },

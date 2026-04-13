@@ -27,6 +27,7 @@ type WinType = 'number' | 'percentage' | 'team';
 type PlayerInfo = {
   points?: number;
   joinedAt?: number;
+  name?: string;
 };
 
 type CompetitionDoc = {
@@ -192,7 +193,7 @@ export default function CompetitionScreen() {
   ): LeaderboardEntry[] => {
     const entries = Object.entries(players ?? {}).map(([uid, pdata]) => ({
       uid,
-      name: uid === myUid ? 'You' : uid.slice(0, 6),
+      name: uid === myUid ? 'You' : pdata.name ?? 'Player',
       points: pdata?.points ?? 0,
       isUser: uid === myUid,
     }));
@@ -383,7 +384,7 @@ export default function CompetitionScreen() {
                 key={entry.uid}
                 style={[
                   styles.leaderboardRow,
-                  entry.isUser && styles.leaderboardRowUser,
+                  entry.isUser && styles.leaderboardRowUser, entry.isWinner && { backgroundColor: 'rgb(51, 97, 51)', borderColor: 'rgb(102, 153, 102)' },
                 ]}
               >
                 <View style={styles.leaderboardLeft}>
@@ -407,14 +408,7 @@ export default function CompetitionScreen() {
           )}
         </Animated.View>
 
-        <Animated.View style={[getAnimatedStyle(contentAnimation), styles.card]}>
-          <Text style={styles.cardTitle}>How scoring works</Text>
-          <Text style={styles.cardBody}>
-            Competition points are pulled directly from the stored values in the
-            competition document. They should already reflect your locked-in
-            minutes within this competition’s start and end dates.
-          </Text>
-        </Animated.View>
+        
       </ScrollView>
     </SafeAreaView>
   );

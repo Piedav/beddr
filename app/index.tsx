@@ -77,6 +77,7 @@ type DayProgress = {
 function formatMinutes(totalMinutes: number) {
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
+  if(h === 0) return `${m}m`;
   return `${h}h ${m}m`;
 }
 
@@ -456,6 +457,7 @@ export default function HomeScreen() {
           console.log('Probably lock screen'); //around 40-60
         } else {
           console.log('Probably home screen / app switch'); //around 600-700
+          
           isLockScreen = false;
           theButtonPressedRef.current = false;
           setTheButtonPressed(false);
@@ -491,7 +493,7 @@ export default function HomeScreen() {
   const getCompetitionStatus = (start : number, end : number)
   : 'ongoing' | 'upcoming' | 'finished' => {
     const now = Date.now();
-
+    
     if (now < start) return 'upcoming';
     if (now > end) return 'finished';
     return 'ongoing';
@@ -680,6 +682,7 @@ export default function HomeScreen() {
       Alert.alert('Error', 'Competition not found.');
       return;
     }
+    
 
     if (competition.userJoined) {
       Alert.alert('Already Joined', 'You are already in this competition!');
@@ -911,7 +914,7 @@ export default function HomeScreen() {
                 )}
 
                 <Animated.View style={getAnimatedStyle(progressAnimation)}>
-                  <View style={styles.weeklyProgressContainer}>
+                  {/* <View style={styles.weeklyProgressContainer}>
                     <Text style={styles.sectionTitle}>This Week's Progress</Text>
                     <View style={styles.weeklyProgressWrapper}>
                       {canScrollLeft && (
@@ -1005,9 +1008,12 @@ export default function HomeScreen() {
                         </TouchableOpacity>
                       )}
                     </View>
+                  </View> */}
+                  <View style = {[styles.row, styles.competitionContainer]}>
+                    <Text style={styles.minutesText}>Lifetime locked in minutes: {formatMinutes(allTimeLockedMinutes)}</Text>
+                    <Text style={styles.minutesText}>This week locked in minutes: {formatMinutes(thisWeekLockedMinutes)}</Text>      
                   </View>
-        <Text style={styles.minutesText}>{formatMinutes(allTimeLockedMinutes)}</Text>
-        <Text style={styles.minutesText}>{formatMinutes(thisWeekLockedMinutes)}</Text>          
+            
         {/* This is the button that toggles giving points and whanot*/}
                   <TouchableOpacity
                     style={styles.theButton}
@@ -1088,7 +1094,7 @@ export default function HomeScreen() {
                                 <Ionicons name="people" size={24} color={strongColor} />
                               </View>
                               <Text style={styles.competitionStatNumber}>
-                                {competition.players.toLocaleString()}
+                                {Object.keys(competition.players || {}).length}
                               </Text>
                               <Text style={styles.competitionStatLabel}>Users</Text>
                             </View>
@@ -1783,5 +1789,11 @@ const styles = StyleSheet.create({
   resetContainer: {
     marginTop: 20,
     marginBottom: 40,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    flexWrap: 'wrap',
   },
 });

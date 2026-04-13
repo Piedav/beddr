@@ -39,13 +39,9 @@ const strongColor = '#cc7bdbff';
 const warmFontType = 'Molengo';
 const defFontType = 'OpenSansSemiBold';
 
-interface SleepEvent {
-  timestamp: number;
-  lockedIn: boolean;
-}
 interface UserProfile {
   name: string;
-  sleepEvents: [];
+  lockedEvents: [];
   pastcomps: Array<{
     date: string;
     money: number;
@@ -53,7 +49,7 @@ interface UserProfile {
     rank: number;
     won: boolean;
   }>;
-  competitions: [];
+  competitions: {};
 }
 
 interface Player {
@@ -65,14 +61,12 @@ interface Player {
 interface Competition {
   id: string;
   name: string;
-
   start: number;
   end: number;
   status: 'ongoing' | 'upcoming' | 'finished';
-  players: Player[];
+  players: Record<string, { points?: number; joinedAt?: any }>;
   reward: string;
   userJoined: boolean;
-  
 }
 
 type DayProgress = {
@@ -80,6 +74,141 @@ type DayProgress = {
   points: number;
   lastPutDown: string;
 };
+function formatMinutes(totalMinutes: number) {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}h ${m}m`;
+}
+
+type LockedEvent = {
+  timestamp: number;
+  lockedIn: boolean;
+};
+
+type LockedSession = {
+  start: number;
+  end: number;
+};
+
+function normalizeLockedEvents(events?: LockedEvent[]): LockedEvent[] {
+  if (!Array.isArray(events)) return [];
+  return [...events]
+    .filter(
+      (e) =>
+        e &&
+        typeof e.timestamp === 'number' &&
+        typeof e.lockedIn === 'boolean'
+    )
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function buildLockedSessions(
+  events?: LockedEvent[],
+  nowMs: number = Date.now()
+): LockedSession[] {
+  const sorted = normalizeLockedEvents(events);
+  const sessions: LockedSession[] = [];
+
+  let currentStart: number | null = null;
+
+  for (const event of sorted) {
+    if (event.lockedIn) {
+      if (currentStart === null) {
+        currentStart = event.timestamp;
+      }
+    } else {
+      if (currentStart !== null && event.timestamp > currentStart) {
+        sessions.push({
+          start: currentStart,
+          end: event.timestamp,
+        });
+        currentStart = null;
+      }
+    }
+  }
+
+  // still locked in right now
+  if (currentStart !== null && nowMs > currentStart) {
+    sessions.push({
+      start: currentStart,
+      end: nowMs,
+    });
+  }
+
+  return sessions;
+}
+
+function getOverlapMs(
+  sessionStart: number,
+  sessionEnd: number,
+  rangeStart: number,
+  rangeEnd: number
+): number {
+  const start = Math.max(sessionStart, rangeStart);
+  const end = Math.min(sessionEnd, rangeEnd);
+  return Math.max(0, end - start);
+}
+
+function getLockedMinutesInRange(
+  events: LockedEvent[] | undefined,
+  rangeStart: number,
+  rangeEnd: number,
+  nowMs: number = Date.now()
+): number {
+  if (rangeEnd <= rangeStart) return 0;
+
+  const sessions = buildLockedSessions(events, nowMs);
+  let totalMs = 0;
+
+  for (const session of sessions) {
+    totalMs += getOverlapMs(session.start, session.end, rangeStart, rangeEnd);
+  }
+
+  return Math.floor(totalMs / 60000);
+}
+async function syncAllJoinedCompetitionPoints(
+  uid: string,
+  lockedEvents: LockedEvent[],
+  competitions: Competition[]
+) {
+  const joined = competitions.filter((c) => c.userJoined);
+
+  await Promise.all(
+    joined.map(async (comp) => {
+      const points = getLockedMinutesInRange(lockedEvents, comp.start, comp.end);
+      const currentPoints = (comp.players as any)?.[uid]?.points ?? 0;
+
+      if (currentPoints === points) return;
+
+      await updateDoc(doc(firestore, 'competitiondb', comp.id), {
+        [`players.${uid}.points`]: points,
+      });
+    })
+  );
+}
+function getAllTimeLockedMinutes(
+  events?: LockedEvent[],
+  nowMs: number = Date.now()
+): number {
+  const sessions = buildLockedSessions(events, nowMs);
+  const totalMs = sessions.reduce((sum, s) => sum + (s.end - s.start), 0);
+  return Math.floor(totalMs / 60000);
+}
+
+function getStartOfWeekMs(date = new Date()) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d.getTime();
+}
+
+function getThisWeekLockedMinutes(
+  events?: LockedEvent[],
+  nowMs: number = Date.now()
+): number {
+  const startOfWeek = getStartOfWeekMs(new Date(nowMs));
+  return getLockedMinutesInRange(events, startOfWeek, nowMs, nowMs);
+}
 
 export default function HomeScreen() {
   const { userData } = useUser();
@@ -92,6 +221,10 @@ export default function HomeScreen() {
   const [contentWidth, setContentWidth] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
   
+  const [allTimeLockedMinutes, setAllTimeLockedMinutes] = useState(0);
+  const [thisWeekLockedMinutes, setThisWeekLockedMinutes] = useState(0);
+  const [lockedEvents, setLockedEvents] = useState<LockedEvent[]>([]);
+
   const [stats, setStats] = useState<{
     totalWins: number;
     averageBedtime: string;
@@ -154,15 +287,26 @@ export default function HomeScreen() {
 
   const getTodayIndex = () => new Date().getDay();
   const recordEvent = async (lockedIn: boolean) => {
-    if(!uid) return;
+    if (!uid) return;
 
-    const newEvent: SleepEvent = {
+    const newEvent: LockedEvent = {
       timestamp: Date.now(),
       lockedIn,
     };
 
     const profileRef = doc(firestore, 'profiledb', uid);
-    await updateDoc(profileRef, {SleepEvents: arrayUnion(newEvent),});
+
+    try {
+      await updateDoc(profileRef, {
+        lockedEvents: arrayUnion(newEvent),
+      });
+    } catch {
+      await setDoc(
+        profileRef,
+        { lockedEvents: [newEvent] },
+        { merge: true }
+      );
+    }
   };
   
 
@@ -195,6 +339,12 @@ export default function HomeScreen() {
     });
     return unsub;
   }, []);
+  useEffect(() => {
+    if (!uid) return;
+    if (!competitions.length) return;
+
+    syncAllJoinedCompetitionPoints(uid, lockedEvents, competitions).catch(console.error);
+  }, [uid, lockedEvents, competitions.length]);
 
   const startAnimations = () => {
     welcomeAnimation.setValue(0);
@@ -414,13 +564,13 @@ export default function HomeScreen() {
     return dates;
   };
 
-  const buildWeektimesFromSleepTimes = (sleepTimes?: Record<string, number>) => {
-    const dates = getThisWeeksDates();
-    return dates.map((dateStr) => {
-      const v = sleepTimes?.[dateStr];
-      return typeof v === 'number' ? v : -1;
-    });
-  };
+  // const buildWeektimesFromSleepTimes = (sleepTimes?: Record<string, number>) => {
+  //   const dates = getThisWeeksDates();
+  //   return dates.map((dateStr) => {
+  //     const v = sleepTimes?.[dateStr];
+  //     return typeof v === 'number' ? v : -1;
+  //   });
+  // };
 
   useEffect(() => {
     if (!uid) return;
@@ -432,15 +582,35 @@ export default function HomeScreen() {
       userDocRef,
       (docSnapshot) => {
         if (docSnapshot.exists()) {
-          const profileData = docSnapshot.data() as UserProfile;
+          const profileData = docSnapshot.data() as any;
           setUserProfile(profileData);
 
-          //const weektimes = buildWeektimesFromSleepTimes(profileData.sleepTimes);
-          //setWeeklyProgress(convertWeektimesToProgressData(weektimes));
+          const events = (profileData?.lockedEvents ?? []) as LockedEvent[];
+          setLockedEvents(events);
+
+          const total = getAllTimeLockedMinutes(events);
+          const week = getThisWeekLockedMinutes(events);
+
+          setAllTimeLockedMinutes(total);
+          setThisWeekLockedMinutes(week);
+
+          if (
+            profileData.totalLockedMinutes !== total ||
+            profileData.thisWeekLockedMinutes !== week
+          ) {
+            updateDoc(userDocRef, {
+              totalLockedMinutes: total,
+              thisWeekLockedMinutes: week,
+            }).catch(() => {});
+          }
+
           setStats(calculateStats(profileData));
         } else {
           console.log('User profile not found for uid:', uid);
           setUserProfile(null);
+          setLockedEvents([]);
+          setAllTimeLockedMinutes(0);
+          setThisWeekLockedMinutes(0);
         }
 
         setProfileLoading(false);
@@ -532,7 +702,14 @@ export default function HomeScreen() {
         return;
       }
 
+      const compData = snap.data() as any;
       const currentUid = userData.uid;
+
+      const initialPoints = getLockedMinutesInRange(
+        lockedEvents,
+        compData.start,
+        compData.end
+      );
 
       await setDoc(
         competitionDocRef,
@@ -540,12 +717,25 @@ export default function HomeScreen() {
           players: {
             [currentUid]: {
               joinedAt: serverTimestamp(),
-              points: 0,
+              points: initialPoints,
             },
           },
         },
         { merge: true }
       );
+
+      const profileRef = doc(firestore, 'profiledb', currentUid);
+      try {
+        await updateDoc(profileRef, {
+          competitions: arrayUnion(competitionId),
+        });
+      } catch {
+        await setDoc(
+          profileRef,
+          { competitions: [competitionId] },
+          { merge: true }
+        );
+      }
 
       Alert.alert('Competition Joined!', "You've successfully joined this competition.", [
         { text: 'OK' },
@@ -710,6 +900,7 @@ export default function HomeScreen() {
               </Animated.View>
 
               <View style={styles.competitionsContainer}>
+                
                 {competitions.some((comp) => comp.userJoined && comp.status === 'ongoing') && (
                   <Animated.View
                     style={[getAnimatedStyle(statusBannerAnimation), styles.statusBanner]}
@@ -815,7 +1006,8 @@ export default function HomeScreen() {
                       )}
                     </View>
                   </View>
-                  
+        <Text style={styles.minutesText}>{formatMinutes(allTimeLockedMinutes)}</Text>
+        <Text style={styles.minutesText}>{formatMinutes(thisWeekLockedMinutes)}</Text>          
         {/* This is the button that toggles giving points and whanot*/}
                   <TouchableOpacity
                     style={styles.theButton}
@@ -1194,6 +1386,10 @@ const styles = StyleSheet.create({
   weeklyProgressRow: {
     flexDirection: 'row',
     paddingHorizontal: 4,
+  },
+  minutesText: {
+    fontSize: 16,
+    color: '#FFFFFF',
   },
   dayCard: {
     backgroundColor: lbgColor,

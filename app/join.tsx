@@ -61,6 +61,123 @@ function formatShortDate(date: Date) {
 
 type PickerTarget = 'start' | 'end' | null;
 
+function formatMinutes(totalMinutes: number) {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}h ${m}m`;
+}
+
+type LockedEvent = {
+  timestamp: number;
+  lockedIn: boolean;
+};
+
+type LockedSession = {
+  start: number;
+  end: number;
+};
+
+function normalizeLockedEvents(events?: LockedEvent[]): LockedEvent[] {
+  if (!Array.isArray(events)) return [];
+  return [...events]
+    .filter(
+      (e) =>
+        e &&
+        typeof e.timestamp === 'number' &&
+        typeof e.lockedIn === 'boolean'
+    )
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function buildLockedSessions(
+  events?: LockedEvent[],
+  nowMs: number = Date.now()
+): LockedSession[] {
+  const sorted = normalizeLockedEvents(events);
+  const sessions: LockedSession[] = [];
+
+  let currentStart: number | null = null;
+
+  for (const event of sorted) {
+    if (event.lockedIn) {
+      if (currentStart === null) {
+        currentStart = event.timestamp;
+      }
+    } else {
+      if (currentStart !== null && event.timestamp > currentStart) {
+        sessions.push({
+          start: currentStart,
+          end: event.timestamp,
+        });
+        currentStart = null;
+      }
+    }
+  }
+
+  // still locked in right now
+  if (currentStart !== null && nowMs > currentStart) {
+    sessions.push({
+      start: currentStart,
+      end: nowMs,
+    });
+  }
+
+  return sessions;
+}
+
+function getOverlapMs(
+  sessionStart: number,
+  sessionEnd: number,
+  rangeStart: number,
+  rangeEnd: number
+): number {
+  const start = Math.max(sessionStart, rangeStart);
+  const end = Math.min(sessionEnd, rangeEnd);
+  return Math.max(0, end - start);
+}
+
+function getLockedMinutesInRange(
+  events: LockedEvent[] | undefined,
+  rangeStart: number,
+  rangeEnd: number,
+  nowMs: number = Date.now()
+): number {
+  if (rangeEnd <= rangeStart) return 0;
+
+  const sessions = buildLockedSessions(events, nowMs);
+  let totalMs = 0;
+
+  for (const session of sessions) {
+    totalMs += getOverlapMs(session.start, session.end, rangeStart, rangeEnd);
+  }
+
+  return Math.floor(totalMs / 60000);
+}
+
+function getAllTimeLockedMinutes(
+  events?: LockedEvent[],
+  nowMs: number = Date.now()
+): number {
+  const sessions = buildLockedSessions(events, nowMs);
+  const totalMs = sessions.reduce((sum, s) => sum + (s.end - s.start), 0);
+  return Math.floor(totalMs / 60000);
+}
+
+function getStartOfWeekMs(date = new Date()) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d.getTime();
+}
+
+function getThisWeekLockedMinutes(
+  events?: LockedEvent[],
+  nowMs: number = Date.now()
+): number {
+  const startOfWeek = getStartOfWeekMs(new Date(nowMs));
+  return getLockedMinutesInRange(events, startOfWeek, nowMs, nowMs);
+}
+
 export default function CompetitionCodesScreen() {
   const { userData } = useUser();
 
@@ -142,7 +259,30 @@ export default function CompetitionCodesScreen() {
         Alert.alert('Already Joined', 'You are already in this competition!');
         return;
       }
+      async function recalculateCompetitionPointsForUser(
+        competitionId: string,
+        uid: string,
+      ) {
+        const compRef = doc(firestore, 'competitiondb', competitionId);
+        const compSnap = await getDoc(compRef);
+        if (!compSnap.exists()) return;
 
+        const comp = compSnap.data() as any;
+        const start = typeof comp?.start === 'number' ? comp.start : null;
+        const end = typeof comp?.end === 'number' ? comp.end : null;
+
+        if (start == null || end == null) return;
+
+        
+
+        const profileRef = doc(firestore, 'profiledb', uid);
+        const profileSnap = await getDoc(profileRef);
+        const lockedEvents = ((profileSnap.data() as any)?.LockedEvents ?? []) as LockedEvent[];
+        const points = getLockedMinutesInRange(lockedEvents, start, end);
+        await updateDoc(compRef, {
+          [`players.${uid}.points`]: getLockedMinutesInRange(lockedEvents, data.start, data.end),
+        });
+      }
       await setDoc(
         compRef,
         {

@@ -3,26 +3,28 @@ import {
   GoogleSignin,
   statusCodes,
 } from '@react-native-google-signin/google-signin';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import * as Linking from 'expo-linking';
+import { GoogleAuthProvider, onAuthStateChanged, signInWithCredential, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Alert, Animated, Dimensions, KeyboardAvoidingView, Platform,
-  ScrollView, StyleSheet, Text, TouchableOpacity, View
+  Alert,
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { auth, firestore } from '../firebase'; // adjust path
+import { auth, firestore } from '../firebase';
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-
-const dbgColor = "#0a0513ff"; //dark background
-const bgColor = "#111124ff"; //background
-const lbgColor = "#322f4e81"; //light background
-const l2bgColor = "#322f4eff"; //2nd light background
-const l3bgColor = "#323150";
-const strongColor = "#cc7bdbff"; //strong color
-
-const warmFontType = "Molengo";
+const dbgColor = "#0a0513ff";
+const bgColor = "#111124ff";
+const lbgColor = "#322f4e81";
+const strongColor = "#cc7bdbff";
 const defFontType = "OpenSansSemiBold";
 
 interface OnboardingStep {
@@ -40,179 +42,121 @@ interface User {
   uid: string;
 }
 
-
-export default function OnboardingScreen({ onComplete }: { onComplete: (data: { user: User; bedtime: string; wakeTime: string; notifications: boolean }) => void }) {
+export default function OnboardingScreen({
+  onComplete,
+}: {
+  onComplete: (data: { user: User }) => void;
+}) {
   const [currentStep, setCurrentStep] = useState(0);
   const [user, setUser] = useState<User | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
-  const [bedtime, setBedtime] = useState('10:00 PM');
-  const [wakeTime, setWakeTime] = useState('7:00 AM');
-  const [notifications, setNotifications] = useState(true);
   const [isCreatingProfile, setIsCreatingProfile] = useState(false);
-  const [showBedtimeDropdown, setShowBedtimeDropdown] = useState(false);
-  const [showWakeTimeDropdown, setShowWakeTimeDropdown] = useState(false);
+  const [isCheckingExistingAuth, setIsCheckingExistingAuth] = useState(true);
+
   const scrollViewRef = useRef<ScrollView>(null);
-
-  // Animation reference for content only
   const contentAnimation = useRef(new Animated.Value(1)).current;
+  const [existingSignedInUser, setExistingSignedInUser] = useState<User | null>(null);
+  const [showSignedInGate, setShowSignedInGate] = useState(false);
 
-  // Animation trigger function for content only
   const animateContent = () => {
-    // Reset content animation
     contentAnimation.setValue(0);
-
-    // Animate content in
     Animated.timing(contentAnimation, {
       toValue: 1,
-      duration: 400,
+      duration: 300,
       useNativeDriver: true,
     }).start();
   };
 
-  // Animate content when step changes
   useEffect(() => {
     animateContent();
   }, [currentStep]);
 
-  // Animation style generator for content only
   const getContentAnimatedStyle = () => ({
     opacity: contentAnimation,
     transform: [
       {
         translateY: contentAnimation.interpolate({
           inputRange: [0, 1],
-          outputRange: [30, 0],
+          outputRange: [24, 0],
         }),
       },
     ],
   });
 
-  // Generate time options for bedtime (7pm to 3am)
-  const generateBedtimeOptions = () => {
-    const times = [];
-    // 7:00 PM to 11:45 PM
-    for (let hour = 9; hour <= 11; hour++) {
-      for (let minute = 0; minute < 60; minute += 15) {
-        const minuteStr = minute.toString().padStart(2, '0');
-        const displayHour = hour > 12 ? hour - 12 : hour;
-        times.push(`${displayHour}:${minuteStr} PM`);
-      }
-    }
-    // 12:00 AM to 3:00 AM
-    for (let hour = 0; hour <= 3; hour++) {
-      for (let minute = 0; minute < 60; minute += 15) {
-        const minuteStr = minute.toString().padStart(2, '0');
-        const displayHour = hour === 0 ? 12 : hour;
-        times.push(`${displayHour}:${minuteStr} AM`);
-        if (hour === 3 && minute === 0) break; // Stop at 3:00 AM
-      }
-    }
-    return times;
-  };
-
-  // Generate time options for wake time (5am to 10am)
-  const generateWakeTimeOptions = () => {
-    const times = [];
-    for (let hour = 5; hour <= 10; hour++) {
-      for (let minute = 0; minute < 60; minute += 15) {
-        const minuteStr = minute.toString().padStart(2, '0');
-        times.push(`${hour}:${minuteStr} AM`);
-      }
-    }
-    return times;
-  };
-
-  const bedtimeOptions = generateBedtimeOptions();
-  const wakeTimeOptions = generateWakeTimeOptions();
-
-  // Configure Google Sign-In
   useEffect(() => {
     GoogleSignin.configure({
-      iosClientId: '188667592970-h4hmpdbimh2ghdv49srbcmoun8h670g7.apps.googleusercontent.com', 
-      scopes: ['profile', 'email', 'openid'], 
-    }); 
+      iosClientId:
+        '188667592970-h4hmpdbimh2ghdv49srbcmoun8h670g7.apps.googleusercontent.com',
+      scopes: ['profile', 'email', 'openid'],
+    });
   }, []);
 
-  // Convert time string to minutes from midnight for points calculation
-  const timeToMinutes = (timeStr: string): number => {
-    const [time, period] = timeStr.split(' ');
-    const [hours, minutes] = time.split(':').map(Number);
-    let totalMinutes = minutes;
-    
-    if (period === 'AM') {
-      if (hours === 12) {
-        totalMinutes += 0; // 12:xx AM is midnight hour
-      } else {
-        totalMinutes += hours * 60;
-      }
-    } else { // PM
-      if (hours === 12) {
-        totalMinutes += 12 * 60; // 12:xx PM is noon hour
-      } else {
-        totalMinutes += (hours + 12) * 60;
-      }
-    }
-    
-    return totalMinutes;
-  };
+  // Skip onboarding if already signed in
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      try {
+        if (firebaseUser) {
+          const existingUser: User = {
+            name: firebaseUser.displayName || 'User',
+            email: firebaseUser.email || '',
+            profilePicture: firebaseUser.photoURL || undefined,
+            uid: firebaseUser.uid,
+          };
 
-  // Calculate points based on bedtime with new system: 9pm = 30 points, 3am = 0 points, lose 5 points per hour
-  const calculatePoints = (bedtimeStr: string): number => {
-    const bedtimeMinutes = timeToMinutes(bedtimeStr);
-    const baseBedtime = timeToMinutes('9:00 PM'); // 1260 minutes (21:00)
-    const latestBedtime = timeToMinutes('3:00 AM'); // 180 minutes (next day)
-    
-    let adjustedBedtime = bedtimeMinutes;
-    
-    // Handle times after midnight (next day)
-    if (bedtimeMinutes < 720) { // Before noon = next day
-      adjustedBedtime = bedtimeMinutes + 1440; // Add 24 hours
-    }
-    
-    // If bedtime is at or after 3:00 AM, return 0 points
-    if (adjustedBedtime >= latestBedtime + 1440) {
-      return 0;
-    }
-    
-    // Calculate hours difference from 9pm
-    const hoursLate = (adjustedBedtime - baseBedtime) / 60;
-    const points = Math.max(0, 30 - (hoursLate * 5));
-    
-    return Math.round(points * 10) / 10; // Round to 1 decimal place
-  };
+          const userDocRef = doc(firestore, 'profiledb', existingUser.uid);
+          const userDoc = await getDoc(userDocRef);
 
-  // Create user profile in Firestore
+          if (!userDoc.exists()) {
+            await setDoc(
+              userDocRef,
+              {
+                name: existingUser.name,
+                competitions: [],
+                lockedEvents: [],
+                totalLockedMinutes: 0,
+                thisWeekLockedMinutes: 0,
+              },
+              { merge: true }
+            );
+          }
+
+          setExistingSignedInUser(existingUser);
+          setUser(existingUser);
+          setShowSignedInGate(true);
+          return;
+        }
+
+        setExistingSignedInUser(null);
+        setShowSignedInGate(false);
+        setUser(null);
+      } catch (error) {
+        console.error('Error checking existing auth:', error);
+      } finally {
+        setIsCheckingExistingAuth(false);
+      }
+    });
+
+    return unsub;
+  }, []);
+
   const createUserProfile = async (userData: User) => {
     try {
       setIsCreatingProfile(true);
-      
-      const userDocRef = doc(firestore, 'profiledb', userData.uid);
-      
-      // Check if user profile already exists
-      const userDoc = await getDoc(userDocRef);
-      
-      if (userDoc.exists()) {
-        // User already has a profile, don't overwrite
-        console.log('User profile already exists, skipping creation');
-        Alert.alert('Welcome Back', 'Your existing profile has been loaded!');
-        return;
-      }
-      
-      // Create new profile only if it doesn't exist
-      const profileData = {
-        avgbedtime: -1,
-        name: userData.name,
-        numdays: 0, 
-        pastcomps: [],
-        sleepTimes: [],
-        competitions: []
-      };
 
-      await setDoc(userDocRef, profileData);
-      
-      console.log('User profile created successfully:', profileData);
-      Alert.alert('Success', 'Your profile has been created!');
-      
+      const userDocRef = doc(firestore, 'profiledb', userData.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (!userDoc.exists()) {
+        const profileData = {
+          name: userData.name,
+          competitions: [],
+          lockedEvents: [],
+          totalLockedMinutes: 0,
+          thisWeekLockedMinutes: 0,
+        };
+
+        await setDoc(userDocRef, profileData);
+      }
     } catch (error) {
       console.error('Error creating user profile:', error);
       Alert.alert('Error', 'Failed to create your profile. Please try again.');
@@ -222,30 +166,25 @@ export default function OnboardingScreen({ onComplete }: { onComplete: (data: { 
     }
   };
 
-  // Google Sign-In function
   const handleGoogleSignIn = async () => {
     setIsSigningIn(true);
-    
+
     try {
       await GoogleSignin.hasPlayServices();
       const userInfo = await GoogleSignin.signIn();
-      
+
       if (userInfo.data) {
-        const idToken = GoogleAuthProvider.credential(userInfo.data.idToken);
-        console.log(JSON.stringify(userInfo, null, 2));
-        
-        // Sign in with Firebase
-        const authResult = await signInWithCredential(auth, idToken);
-        
-        // Set user data for the onboarding flow
-        const userData: User = {
+        const credential = GoogleAuthProvider.credential(userInfo.data.idToken);
+        const authResult = await signInWithCredential(auth, credential);
+
+        const signedInUser: User = {
           name: userInfo.data.user.givenName || 'User',
           email: userInfo.data.user.email,
           profilePicture: userInfo.data.user.photo || undefined,
-          uid: authResult.user.uid
+          uid: authResult.user.uid,
         };
-        
-        setUser(userData);
+
+        setUser(signedInUser);
       }
     } catch (error: any) {
       if (error.code === statusCodes.SIGN_IN_CANCELLED) {
@@ -260,184 +199,55 @@ export default function OnboardingScreen({ onComplete }: { onComplete: (data: { 
       setIsSigningIn(false);
     }
   };
+  const handleUseExistingAccount = () => {
+    if (existingSignedInUser) {
+      onComplete({ user: existingSignedInUser });
+    }
+  };
 
-  const TimeDropdown = ({ 
-    value, 
-    onSelect, 
-    isVisible, 
-    onToggle, 
-    label, 
-    icon,
-    options
-  }: {
-    value: string;
-    onSelect: (time: string) => void;
-    isVisible: boolean;
-    onToggle: () => void;
-    label: string;
-    icon: string;
-    options: string[];
-  }) => (
-    <View style={styles.timeInputGroup}>
-      <Text style={styles.inputLabel}>{label}</Text>
-      <TouchableOpacity style={styles.timeInput} onPress={onToggle}>
-        <Ionicons name={icon as any} size={20} color={strongColor} />
-        <Text style={styles.timeText}>{value}</Text>
-        <Ionicons 
-          name={isVisible ? "chevron-up" : "chevron-down"} 
-          size={20} 
-          color="#666" 
-        />
-      </TouchableOpacity>
-      
-      {isVisible && (
-        <View style={styles.dropdown}>
-          <ScrollView 
-            style={styles.dropdownScroll} 
-            showsVerticalScrollIndicator={true}
-            nestedScrollEnabled={true}
-          >
-            {options.map((time, index) => (
-              <TouchableOpacity
-                key={index}
-                style={[
-                  styles.dropdownItem,
-                  time === value && styles.dropdownItemSelected
-                ]}
-                onPress={() => {
-                  onSelect(time);
-                  onToggle();
-                }}
-              >
-                <Text style={[
-                  styles.dropdownItemText,
-                  time === value && styles.dropdownItemTextSelected
-                ]}>
-                  {time}
-                </Text>
-                {time === value && (
-                  <Ionicons name="checkmark" size={16} color={strongColor} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-      
-      <Text style={styles.timeHint}>
-        {label.includes('Bedtime') 
-          ? 'When you\'ll put down your phone each night'
-          : 'When you\'ll claim your points each morning'
-        }
-      </Text>
-    </View>
-  );
-
+  const handleSignOutFromOnboarding = async () => {
+    try {
+      await GoogleSignin.signOut().catch(() => {});
+      await signOut(auth);
+      setExistingSignedInUser(null);
+      setUser(null);
+      setShowSignedInGate(false);
+      setCurrentStep(0);
+    } catch (error) {
+      console.error('Error signing out:', error);
+      Alert.alert('Error', 'Could not sign out. Please try again.');
+    }
+  };
   const steps: OnboardingStep[] = [
     {
       id: 0,
       title: 'Welcome to Beddr',
-      subtitle: 'Play your way to better sleep',
+      subtitle: 'Compete by staying off your phone',
       icon: 'moon',
       content: (
         <View style={styles.stepContent}>
           <View style={styles.featuresList}>
             <View style={styles.featureItem}>
-              <Ionicons name="trophy" size={24} color={strongColor} />
-              <Text style={styles.featureText}>Play others in competitions</Text>
+              <Ionicons name="lock-closed" size={24} color={strongColor} />
+              <Text style={styles.featureText}>Lock in to track focused, off-phone time</Text>
             </View>
             <View style={styles.featureItem}>
-              <Ionicons name="time" size={24} color={strongColor} />
-              <Text style={styles.featureText}>Earn points for sleeping early</Text>
+              <Ionicons name="trophy" size={24} color={strongColor} />
+              <Text style={styles.featureText}>Join competitions with friends using codes</Text>
             </View>
             <View style={styles.featureItem}>
               <Ionicons name="cash" size={24} color={strongColor} />
-              <Text style={styles.featureText}>Earn money, dinner with friends, etc.</Text>
+              <Text style={styles.featureText}>Win rewards by finishing in the winner zone</Text>
             </View>
           </View>
         </View>
-      )
+      ),
     },
     {
       id: 1,
-      title: 'Earn Points for Sleeping',
-      subtitle: 'The earlier you sleep, the more points you earn',
-      icon: 'stats-chart',
-      content: (
-        <View style={styles.stepContent}>
-          <View style={styles.pointsExplanation}>
-            <View style={styles.pointsScale}>
-              <View style={styles.pointsRow}>
-                <Text style={styles.bedtimeText}>9:00 PM</Text>
-                <View style={styles.pointsBar}>
-                  <View style={[styles.pointsFill, { width: '100%' }]} />
-                </View>
-                <Text style={styles.pointsValue}>30 pts</Text>
-              </View>
-              
-              <View style={styles.pointsRow}>
-                <Text style={styles.bedtimeText}>10:00 PM</Text>
-                <View style={styles.pointsBar}>
-                  <View style={[styles.pointsFill, { width: '83%' }]} />
-                </View>
-                <Text style={styles.pointsValue}>25 pts</Text>
-              </View>
-              
-              <View style={styles.pointsRow}>
-                <Text style={styles.bedtimeText}>11:00 PM</Text>
-                <View style={styles.pointsBar}>
-                  <View style={[styles.pointsFill, { width: '67%' }]} />
-                </View>
-                <Text style={styles.pointsValue}>20 pts</Text>
-              </View>
-              
-              <View style={styles.pointsRow}>
-                <Text style={styles.bedtimeText}>12:00 AM</Text>
-                <View style={styles.pointsBar}>
-                  <View style={[styles.pointsFill, { width: '50%' }]} />
-                </View>
-                <Text style={styles.pointsValue}>15 pts</Text>
-              </View>
-              
-              <View style={styles.pointsRow}>
-                <Text style={styles.bedtimeText}>1:00 AM</Text>
-                <View style={styles.pointsBar}>
-                  <View style={[styles.pointsFill, { width: '33%' }]} />
-                </View>
-                <Text style={styles.pointsValue}>10 pts</Text>
-              </View>
-              
-              <View style={styles.pointsRow}>
-                <Text style={styles.bedtimeText}>2:00 AM</Text>
-                <View style={styles.pointsBar}>
-                  <View style={[styles.pointsFill, { width: '17%' }]} />
-                </View>
-                <Text style={styles.pointsValue}>5 pts</Text>
-              </View>
-              
-              <View style={styles.pointsRow}>
-                <Text style={styles.bedtimeText}>3:00 AM+</Text>
-                <View style={styles.pointsBar}>
-                  <View style={[styles.pointsFill, { width: '0%' }]} />
-                </View>
-                <Text style={styles.pointsValue}>0 pts</Text>
-              </View>
-            </View>
-          </View>
-          
-          <View style={styles.claimInfo}>
-            <Ionicons name="sunny" size={30} color={strongColor} />
-            <Text style={styles.claimTitle}>Claim Points Each Morning</Text>
-            <Text style={styles.claimText}>Open the app each morning to claim your points from the previous night</Text>
-          </View>
-        </View>
-      )
-    },
-    {
-      id: 2,
-      title: 'Competitions',
-      subtitle: 'Simple steps to compete and earn',
-      icon: 'trophy',
+      title: 'How Lock In Works',
+      subtitle: 'Your time counts while you stay locked in',
+      icon: 'timer',
       content: (
         <View style={styles.stepContent}>
           <View style={styles.stepsContainer}>
@@ -446,320 +256,236 @@ export default function OnboardingScreen({ onComplete }: { onComplete: (data: { 
                 <Text style={styles.stepNumberText}>1</Text>
               </View>
               <View style={styles.stepInfo}>
-                <Text style={styles.stepTitle}>Join Weekly Competition</Text>
-                <Text style={styles.stepText}>Join a friend, family, or foe, or make your own</Text>
+                <Text style={styles.stepTitle}>Tap Lock In</Text>
+                <Text style={styles.stepText}>Start a locked session from the home screen.</Text>
               </View>
             </View>
-            
+
             <View style={styles.howItWorksStep}>
               <View style={styles.stepNumber}>
                 <Text style={styles.stepNumberText}>2</Text>
               </View>
               <View style={styles.stepInfo}>
-                <Text style={styles.stepTitle}>Sleep Early & Earn Points</Text>
-                <Text style={styles.stepText}>Go to bed early each night to maximize your points</Text>
+                <Text style={styles.stepTitle}>Stay Off Your Phone</Text>
+                <Text style={styles.stepText}>
+                  Your locked time builds while you stay in this app (off of other distracting apps) or have your phone locked.
+                </Text>
               </View>
             </View>
-            
+
             <View style={styles.howItWorksStep}>
               <View style={styles.stepNumber}>
                 <Text style={styles.stepNumberText}>3</Text>
               </View>
               <View style={styles.stepInfo}>
-                <Text style={styles.stepTitle}>Claim Daily Points</Text>
-                <Text style={styles.stepText}>Open the app each morning to claim your points</Text>
+                <Text style={styles.stepTitle}>Lock Out Automatically</Text>
+                <Text style={styles.stepText}>
+                  Leaving the app ends the session and records your time.
+                </Text>
               </View>
             </View>
-            
+          </View>
+
+          <View style={styles.claimInfo}>
+            <Ionicons name="stats-chart" size={30} color={strongColor} />
+            <Text style={styles.claimTitle}>Track Your Minutes</Text>
+            <Text style={styles.claimText}>
+              Beddr shows your lifetime locked minutes and your locked minutes this week.
+            </Text>
+          </View>
+        </View>
+      ),
+    },
+    {
+      id: 2,
+      title: 'Join or Create Competitions',
+      subtitle: 'Play with friends your way',
+      icon: 'people',
+      content: (
+        <View style={styles.stepContent}>
+          <View style={styles.stepsContainer}>
             <View style={styles.howItWorksStep}>
               <View style={styles.stepNumber}>
-                <Text style={styles.stepNumberText}>4</Text>
+                <Text style={styles.stepNumberText}>1</Text>
               </View>
               <View style={styles.stepInfo}>
-                <Text style={styles.stepTitle}>Win in Life</Text>
-                <Text style={styles.stepText}>Split a prize pool or other reward among the top scorers on top of your better sleep</Text>
+                <Text style={styles.stepTitle}>Join by Code</Text>
+                <Text style={styles.stepText}>Enter a friend’s competition code to join instantly.</Text>
               </View>
             </View>
-          </View>
-          
-          <View style={styles.prizingExample}>
-            <Text style={styles.prizingTitle}>Example Weekly Prizes</Text>
-            <Text style={styles.prizingSubtitle}>(large scale public game)</Text>
-            <Text style={styles.prizingSubtitle}>100 players × $5 entry fee = $500 prize pool</Text>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>🥇 1st Place</Text>
-              <Text style={styles.prizingAmount}>$25.12</Text>
+
+            <View style={styles.howItWorksStep}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>2</Text>
+              </View>
+              <View style={styles.stepInfo}>
+                <Text style={styles.stepTitle}>Create Your Own</Text>
+                <Text style={styles.stepText}>Set a name, reward, date range, and winner rule.</Text>
+              </View>
             </View>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>🥈 2nd Place</Text>
-              <Text style={styles.prizingAmount}>$22.61</Text>
-            </View>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>🥉 3rd Place</Text>
-              <Text style={styles.prizingAmount}>$20.35</Text>
-            </View>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>⭐ 10th Place</Text>
-              <Text style={styles.prizingAmount}>$9.73</Text>
-            </View>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>⭐ 25th Place</Text>
-              <Text style={styles.prizingAmount}>$2.00</Text>
-            </View>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>⭐ 50th Place</Text>
-              <Text style={styles.prizingAmount}>$0.14</Text>
-            </View>
-            <View style={styles.cutoffLine}>
-              <View style={styles.cutoffDivider} />
-              <Text style={styles.cutoffText}>CUTOFF</Text>
-              <View style={styles.cutoffDivider} />
-            </View>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>❌ 51st-100th</Text>
-              <Text style={styles.prizingLoss}>-$5.00</Text>
-            </View>
-          </View>
-          <Text></Text>
-          <View style={styles.prizingExample}>
-            <Text style={styles.prizingSubtitle}>(family sized private game)</Text>
-            <Text style={styles.prizingSubtitle}>person in last has to pay for an ice cream trip</Text>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>🥇 Mom</Text>
-              <Text style={styles.prizingAmount}>free ice cream</Text>
-            </View>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>🥈 Dad</Text>
-              <Text style={styles.prizingAmount}>free ice cream</Text>
-            </View>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>🥉 Helen</Text>
-              <Text style={styles.prizingAmount}>free ice cream</Text>
-            </View>
-            <View style={styles.cutoffLine}>
-              <View style={styles.cutoffDivider} />
-              <Text style={styles.cutoffText}>CUTOFF</Text>
-              <View style={styles.cutoffDivider} />
-            </View>
-            <View style={styles.prizingRow}>
-              <Text style={styles.prizingRank}>❌ David</Text>
-              <Text style={styles.prizingLoss}>must fund ice cream trip</Text>
+
+            <View style={styles.howItWorksStep}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>3</Text>
+              </View>
+              <View style={styles.stepInfo}>
+                <Text style={styles.stepTitle}>Earn Points During the Competition</Text>
+                <Text style={styles.stepText}>Only locked minutes inside the competition dates count.</Text>
+              </View>
             </View>
           </View>
         </View>
-      )
+      ),
     },
     {
       id: 3,
-      title: 'Create Your Account',
-      subtitle: 'Connect your Google account to get started',
-      icon: 'person',
+      title: 'Different Ways to Win',
+      subtitle: 'Each competition can have its own rules',
+      icon: 'ribbon',
       content: (
         <View style={styles.stepContent}>
-          {!user ? (
-            <>
-              <View style={styles.signInContainer}>
-                <TouchableOpacity 
-                  style={[styles.googleSignInButton, isSigningIn && styles.googleSignInButtonDisabled]}
-                  onPress={handleGoogleSignIn}
-                  disabled={isSigningIn}
-                >
-                  {isSigningIn ? (
-                    <>
-                      <View style={styles.loadingSpinner} />
-                      <Text style={styles.googleSignInButtonText}>Signing In...</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Ionicons name="logo-google" size={20} color="#FFFFFF" />
-                      <Text style={styles.googleSignInButtonText}>Continue with Google</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-                
-                <View style={styles.privacyInfo}>
-                  <Text style={styles.privacyText}>
-                    By signing in, you agree to our Terms of Service and Privacy Policy
-                  </Text>
-                </View>
-              </View>
-            </>
-          ) : (
-            <View style={styles.signInSuccess}>
-              <View style={styles.successCheckmark}>
-                <Ionicons name="checkmark-circle" size={60} color={strongColor} />
-              </View>
-              
-              <Text style={styles.welcomeMessage}>
-                Welcome <Text style={styles.welcomeName}>{user.name}!</Text>
-              </Text>
-              
-              <View style={styles.userInfo}>
-                <Text style={styles.userEmail}>{user.email}</Text>
-              </View>
-              
-              <Text style={styles.successDescription}>
-                Your account has been created successfully. Ready to start competing for better sleep?
+          <View style={styles.featuresList}>
+            <View style={styles.featureItem}>
+              <Ionicons name="trophy-outline" size={24} color={strongColor} />
+              <Text style={styles.featureText}>Top # wins — for example, top 1 or top 3 players</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="podium-outline" size={24} color={strongColor} />
+              <Text style={styles.featureText}>Top % wins — for example, top 10% or 25%</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="people-circle-outline" size={24} color={strongColor} />
+              <Text style={styles.featureText}>
+                Team goal — everyone wins if total team points reach the goal
               </Text>
             </View>
-          )}
+          </View>
         </View>
-      )
+      ),
     },
     {
       id: 4,
-      title: 'Set Your Sleep Goal',
-      subtitle: 'What time do you want to aim for?',
-      icon: 'time',
+      title: 'See Your Progress',
+      subtitle: 'Your profile keeps score',
+      icon: 'person',
       content: (
         <View style={styles.stepContent}>
-          <View style={styles.timeInputsContainer}>
-            <TimeDropdown
-              value={bedtime}
-              onSelect={setBedtime}
-              isVisible={showBedtimeDropdown}
-              onToggle={() => {
-                setShowBedtimeDropdown(!showBedtimeDropdown);
-                setShowWakeTimeDropdown(false);
-              }}
-              label="Target Bedtime"
-              icon="moon"
-              options={bedtimeOptions}
-            />
-            
-            <TimeDropdown
-              value={wakeTime}
-              onSelect={setWakeTime}
-              isVisible={showWakeTimeDropdown}
-              onToggle={() => {
-                setShowWakeTimeDropdown(!showWakeTimeDropdown);
-                setShowBedtimeDropdown(false);
-              }}
-              label="Wake Up Time"
-              icon="sunny"
-              options={wakeTimeOptions}
-            />
-          </View>
-          
-          <View style={styles.sleepSummary}>
-            <Text style={styles.summaryTitle}>Your Competition Strategy</Text>
-            <Text style={styles.summaryText}>
-              Bedtime: {bedtime} = {calculatePoints(bedtime)} points/night
-            </Text>
-            <Text style={styles.summarySubtext}>
-              {(calculatePoints(bedtime) * 7).toFixed(1)} points per week if you stick to it!
-            </Text>
+          <View style={styles.featuresList}>
+            <View style={styles.featureItem}>
+              <Ionicons name="time-outline" size={24} color={strongColor} />
+              <Text style={styles.featureText}>View your finished competitions</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="bar-chart-outline" size={24} color={strongColor} />
+              <Text style={styles.featureText}>See wins, average rank, and total competition points</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="create-outline" size={24} color={strongColor} />
+              <Text style={styles.featureText}>Edit your display name anytime from your profile</Text>
+            </View>
           </View>
         </View>
-      )
+      ),
     },
     {
       id: 5,
-      title: 'Stay Motivated',
-      subtitle: 'Get reminders to maximize your earnings',
-      icon: 'notifications',
+      title: 'Ready to Play?',
+      subtitle: 'Sign in to create your profile and start competing',
+      icon: 'log-in',
       content: (
         <View style={styles.stepContent}>
-          <View style={styles.notificationOption}>
-            <TouchableOpacity 
-              style={styles.notificationToggle}
-              onPress={() => setNotifications(!notifications)}
-            >
-              <View style={styles.toggleInfo}>
-                <Ionicons name="notifications" size={24} color={strongColor} />
-                <View style={styles.toggleText}>
-                  <Text style={styles.toggleTitle}>Push Notifications</Text>
-                  <Text style={styles.toggleSubtitle}>Bedtime reminders and competition updates</Text>
-                </View>
+          {user ? (
+            <View style={styles.signInSuccess}>
+              <Ionicons
+                name="checkmark-circle"
+                size={56}
+                color="#10B981"
+                style={styles.successCheckmark}
+              />
+              <Text style={styles.welcomeMessage}>
+                Welcome, <Text style={styles.welcomeName}>{user.name}</Text>
+              </Text>
+
+              <View style={styles.userInfo}>
+                <Text style={styles.userEmail}>{user.email}</Text>
               </View>
-              <View style={[styles.toggle, notifications && styles.toggleActive]}>
-                <View style={[styles.toggleHandle, notifications && styles.toggleHandleActive]} />
+
+              <Text style={styles.successDescription}>
+                You’re signed in and ready to start competing.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.signInContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.googleSignInButton,
+                  isSigningIn && styles.googleSignInButtonDisabled,
+                ]}
+                onPress={handleGoogleSignIn}
+                disabled={isSigningIn}
+              >
+                <Ionicons name="logo-google" size={20} color="#FFFFFF" />
+                <Text style={styles.googleSignInButtonText}>
+                  {isSigningIn ? 'Signing In...' : 'Sign in with Google'}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.privacyInfo}>
+                <Text style={styles.privacyText}>
+                  We use Google sign-in to create your profile and save your progress.
+                </Text>
+
+                <Text style={styles.termsText}>
+                  By signing in, you agree to our{' '}
+                  <Text
+                    style={styles.linkText}
+                    onPress={() => Linking.openURL('https://docs.google.com/document/d/18RLEc3hMAVze3sMHwHNVXARgPBD4pvHT3VGBDKF-9ro/edit?usp=sharing')}
+                  >
+                    Terms of Service
+                  </Text> and{' '}
+                  <Text
+                    style={styles.linkText}
+                    onPress={() => Linking.openURL('https://docs.google.com/document/d/1JtSSQVSdmyJQpEnILBLqRfdohhEOBnuJIaFCMSf0zTU/edit?usp=sharing')}
+                  >
+                    Privacy Policy
+                  </Text>.
+                </Text>
               </View>
-            </TouchableOpacity>
-          </View>
-          
-          <View style={styles.notificationTypes}>
-            <Text style={styles.notificationTypesTitle}>You'll receive notifications for:</Text>
-            
-            <View style={styles.notificationType}>
-              <Ionicons name="time" size={20} color={strongColor} />
-              <Text style={styles.notificationTypeText}>Bedtime reminders</Text>
-            </View>
-            
-            <View style={styles.notificationType}>
-              <Ionicons name="sunny" size={20} color={strongColor} />
-              <Text style={styles.notificationTypeText}>Morning point claiming reminders</Text>
-            </View>
-            
-            <View style={styles.notificationType}>
-              <Ionicons name="trophy" size={20} color={strongColor} />
-              <Text style={styles.notificationTypeText}>Competition results & rankings</Text>
-            </View>
-            
-            <View style={styles.notificationType}>
-              <Ionicons name="cash" size={20} color={strongColor} />
-              <Text style={styles.notificationTypeText}>Prize pool & earnings updates</Text>
-            </View>
-          </View>
-          
-          <Text style={styles.privacyNote}>
-            You can change notification settings anytime in your profile.
-          </Text>
-        </View>
-      )
-    },
-    {
-      id: 6,
-      title: 'You\'re All Set!',
-      subtitle: 'Ready to start competing',
-      icon: 'checkmark-circle',
-      content: (
-        <View style={styles.stepContent}>
-          {isCreatingProfile && (
-            <View style={styles.creatingProfile}>
-              <View style={styles.loadingSpinner} />
-              <Text style={styles.creatingProfileText}>Creating your profile...</Text>
             </View>
           )}
         </View>
-      )
-    }
+      ),
+    },
   ];
 
   const nextStep = async () => {
     if (currentStep < steps.length - 1) {
-      setCurrentStep(currentStep + 1);
+      setCurrentStep((prev) => prev + 1);
       scrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: true });
-    } else {
-      // Complete onboarding - create user profile in database
-      if (user) {
-        try {
-          await createUserProfile(user);
-          onComplete({ 
-            user, 
-            bedtime, 
-            wakeTime, 
-            notifications,
-          });
-        } catch (error) {
-          console.error('Failed to complete onboarding:', error);
-          // Don't proceed if profile creation failed
-          return;
-        }
-      }
+      return;
+    }
+
+    if (!user) return;
+
+    try {
+      await createUserProfile(user);
+      onComplete({ user });
+    } catch (error) {
+      console.error('Failed to complete onboarding:', error);
     }
   };
 
   const prevStep = () => {
     if (currentStep > 0) {
-      setCurrentStep(currentStep - 1);
+      setCurrentStep((prev) => prev - 1);
       scrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: true });
     }
   };
 
   const canProceed = () => {
-    if (currentStep === 3) return user !== null;
-    if (currentStep === steps.length - 1) return !isCreatingProfile;
+    if (currentStep === steps.length - 1) {
+      return user !== null && !isCreatingProfile;
+    }
     return true;
   };
 
@@ -767,24 +493,67 @@ export default function OnboardingScreen({ onComplete }: { onComplete: (data: { 
     if (currentStep === steps.length - 1) {
       return isCreatingProfile ? 'Creating Profile...' : 'Start Competing';
     }
-    if (currentStep === 0) return 'Let\'s Begin';
+    if (currentStep === 0) return "Let's Begin";
     return 'Continue';
   };
 
+  if (isCheckingExistingAuth) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Ionicons name="moon" size={48} color={strongColor} />
+          <Text style={styles.loadingText}>Loading Beddr...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+  if (showSignedInGate && existingSignedInUser) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={[styles.centered, { padding: 24 }]}>
+          <View style={styles.iconContainer}>
+            <Ionicons name="person-circle-outline" size={40} color={strongColor} />
+          </View>
+
+          <Text style={styles.title}>Welcome Back</Text>
+          <Text style={styles.subtitle}>
+            You’re already signed in as {existingSignedInUser.name}.
+          </Text>
+
+          <View style={styles.userInfo}>
+            <Text style={styles.userEmail}>{existingSignedInUser.email}</Text>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.navButton, styles.nextButton, { width: '100%', marginHorizontal: 0, marginTop: 12 }]}
+            onPress={handleUseExistingAccount}
+          >
+            <Text style={styles.nextButtonText}>Continue</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.navButton, styles.backButton, { width: '100%', marginHorizontal: 0, marginTop: 12 }]}
+            onPress={handleSignOutFromOnboarding}
+          >
+            <Text style={styles.backButtonText}>Sign Out</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* Static Progress Indicator */}
         <View style={styles.progressContainer}>
           <View style={styles.progressBar}>
-            <View 
+            <View
               style={[
-                styles.progressFill, 
-                { width: `${((currentStep + 1) / steps.length) * 100}%` }
-              ]} 
+                styles.progressFill,
+                { width: `${((currentStep + 1) / steps.length) * 100}%` },
+              ]}
             />
           </View>
           <Text style={styles.progressText}>
@@ -792,57 +561,79 @@ export default function OnboardingScreen({ onComplete }: { onComplete: (data: { 
           </Text>
         </View>
 
-        <ScrollView 
+        <ScrollView
           ref={scrollViewRef}
-          style={styles.scrollView} 
+          style={styles.scrollView}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
           <View style={styles.content}>
-            {/* Animated Content */}
             <Animated.View style={getContentAnimatedStyle()}>
-              {/* Header */}
               <View style={styles.header}>
                 <View style={styles.iconContainer}>
-                  <Ionicons 
-                    name={steps[currentStep].icon as any} 
-                    size={40} 
-                    color={strongColor} 
+                  <Ionicons
+                    name={steps[currentStep].icon as any}
+                    size={40}
+                    color={strongColor}
                   />
                 </View>
                 <Text style={styles.title}>{steps[currentStep].title}</Text>
                 <Text style={styles.subtitle}>{steps[currentStep].subtitle}</Text>
               </View>
 
-              {/* Step Content */}
               {steps[currentStep].content}
             </Animated.View>
           </View>
         </ScrollView>
 
-        {/* Static Navigation */}
         <View style={styles.navigationContainer}>
-          <TouchableOpacity 
-            style={[styles.navButton, styles.backButton, currentStep === 0 && styles.navButtonDisabled]}
+          <TouchableOpacity
+            style={[
+              styles.navButton,
+              styles.backButton,
+              currentStep === 0 && styles.navButtonDisabled,
+            ]}
             onPress={prevStep}
             disabled={currentStep === 0}
           >
-            <Ionicons name="chevron-back" size={20} color={currentStep === 0 ? "#666" : strongColor} />
-            <Text style={[styles.backButtonText, currentStep === 0 && styles.navButtonTextDisabled]}>
+            <Ionicons
+              name="chevron-back"
+              size={20}
+              color={currentStep === 0 ? '#666' : strongColor}
+            />
+            <Text
+              style={[
+                styles.backButtonText,
+                currentStep === 0 && styles.navButtonTextDisabled,
+              ]}
+            >
               Back
             </Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.navButton, styles.nextButton, !canProceed() && styles.navButtonDisabled]}
+
+          <TouchableOpacity
+            style={[
+              styles.navButton,
+              styles.nextButton,
+              !canProceed() && styles.navButtonDisabled,
+            ]}
             onPress={nextStep}
             disabled={!canProceed()}
           >
-            <Text style={[styles.nextButtonText, !canProceed() && styles.navButtonTextDisabled]}>
+            <Text
+              style={[
+                styles.nextButtonText,
+                !canProceed() && styles.navButtonTextDisabled,
+              ]}
+            >
               {getButtonText()}
             </Text>
             {currentStep < steps.length - 1 && (
-              <Ionicons name="chevron-forward" size={20} color={!canProceed() ? "#666" : "#FFFFFF"} />
+              <Ionicons
+                name="chevron-forward"
+                size={20}
+                color={!canProceed() ? '#666' : '#FFFFFF'}
+              />
             )}
           </TouchableOpacity>
         </View>
@@ -852,12 +643,36 @@ export default function OnboardingScreen({ onComplete }: { onComplete: (data: { 
 }
 
 const styles = StyleSheet.create({
+  termsText: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 16,
+    fontFamily: defFontType,
+  },
+
+  linkText: {
+    color: strongColor,
+    textDecorationLine: 'underline',
+  },
   container: {
     flex: 1,
     backgroundColor: bgColor,
   },
   keyboardView: {
     flex: 1,
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 14,
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontFamily: defFontType,
   },
   progressContainer: {
     paddingHorizontal: 20,
@@ -879,6 +694,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#B0B0B0',
     textAlign: 'center',
+    fontFamily: defFontType,
   },
   scrollView: {
     flex: 1,
@@ -910,19 +726,19 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 8,
+    fontFamily: defFontType,
   },
   subtitle: {
     fontSize: 16,
     color: '#B0B0B0',
     textAlign: 'center',
     lineHeight: 22,
+    fontFamily: defFontType,
   },
   stepContent: {
     flex: 1,
     alignItems: 'center',
   },
-
-  // Welcome Step
   featuresList: {
     width: '100%',
   },
@@ -939,47 +755,8 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     marginLeft: 16,
     fontWeight: '500',
-  },
-
-  // Points Explanation Step
-  pointsExplanation: {
-    width: '100%',
-    marginBottom: 30,
-  },
-  pointsScale: {
-    backgroundColor: bgColor,
-    borderRadius: 16,
-    padding: 20,
-  },
-  pointsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  bedtimeText: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    width: 70,
-    fontWeight: '500',
-  },
-  pointsBar: {
     flex: 1,
-    height: 8,
-    backgroundColor: l3bgColor,
-    borderRadius: 4,
-    marginHorizontal: 12,
-  },
-  pointsFill: {
-    height: '100%',
-    backgroundColor: strongColor,
-    borderRadius: 4,
-  },
-  pointsValue: {
-    fontSize: 14,
-    color: strongColor,
-    fontWeight: '600',
-    width: 50,
-    textAlign: 'right',
+    fontFamily: defFontType,
   },
   claimInfo: {
     backgroundColor: lbgColor,
@@ -995,15 +772,15 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 8,
     textAlign: 'center',
+    fontFamily: defFontType,
   },
   claimText: {
     fontSize: 14,
     color: '#B0B0B0',
     textAlign: 'center',
     lineHeight: 20,
+    fontFamily: defFontType,
   },
-
-  // How It Works Step
   stepsContainer: {
     width: '100%',
     marginBottom: 30,
@@ -1026,6 +803,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#FFFFFF',
+    fontFamily: defFontType,
   },
   stepInfo: {
     flex: 1,
@@ -1035,69 +813,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
     marginBottom: 4,
+    fontFamily: defFontType,
   },
   stepText: {
     fontSize: 14,
     color: '#B0B0B0',
     lineHeight: 20,
+    fontFamily: defFontType,
   },
-  prizingExample: {
-    backgroundColor: lbgColor,
-    borderRadius: 16,
-    padding: 20,
-    width: '100%',
-  },
-  prizingTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  prizingSubtitle: {
-    fontSize: 12,
-    color: '#B0B0B0',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  prizingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  prizingRank: {
-    fontSize: 14,
-    color: '#B0B0B0',
-  },
-  prizingAmount: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#10B981',
-  },
-  prizingLoss: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#EF4444',
-  },
-  cutoffLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 8,
-  },
-  cutoffDivider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#EF4444',
-  },
-  cutoffText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#EF4444',
-    marginHorizontal: 12,
-  },
-
-  // Google Sign-In Step
   signInContainer: {
     width: '100%',
     alignItems: 'center',
@@ -1121,14 +844,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
     marginLeft: 12,
-  },
-  loadingSpinner: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    borderTopColor: 'transparent',
+    fontFamily: defFontType,
   },
   privacyInfo: {
     backgroundColor: lbgColor,
@@ -1141,9 +857,8 @@ const styles = StyleSheet.create({
     color: '#B0B0B0',
     textAlign: 'center',
     lineHeight: 16,
+    fontFamily: defFontType,
   },
-  
-  // Sign-In Success
   signInSuccess: {
     width: '100%',
     alignItems: 'center',
@@ -1157,6 +872,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 20,
+    fontFamily: defFontType,
   },
   welcomeName: {
     color: strongColor,
@@ -1172,232 +888,15 @@ const styles = StyleSheet.create({
   userEmail: {
     fontSize: 14,
     color: '#B0B0B0',
+    fontFamily: defFontType,
   },
   successDescription: {
     fontSize: 16,
     color: '#B0B0B0',
     textAlign: 'center',
     lineHeight: 24,
+    fontFamily: defFontType,
   },
-
-  // Sleep Schedule Step - Enhanced with dropdowns
-  inputLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  timeInputsContainer: {
-    width: '100%',
-    marginBottom: 30,
-  },
-  timeInputGroup: {
-    marginBottom: 24,
-    position: 'relative',
-    zIndex: 1,
-  },
-  timeInput: {
-    backgroundColor: lbgColor,
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  timeText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    flex: 1,
-    marginLeft: 12,
-  },
-  timeHint: {
-    fontSize: 12,
-    color: strongColor,
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  
-  // Dropdown styles
-  dropdown: {
-    backgroundColor: lbgColor,
-    borderRadius: 12,
-    marginTop: 8,
-    maxHeight: 200,
-    borderWidth: 1,
-    borderColor: '#333',
-    zIndex: 1000,
-  },
-  dropdownScroll: {
-    maxHeight: 200,
-  },
-  dropdownItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  dropdownItemSelected: {
-    backgroundColor: 'rgba(157, 78, 221, 0.1)',
-  },
-  dropdownItemText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-  dropdownItemTextSelected: {
-    color: strongColor,
-    fontWeight: '600',
-  },
-  
-  sleepSummary: {
-    backgroundColor: lbgColor,
-    borderRadius: 16,
-    padding: 20,
-    width: '100%',
-    alignItems: 'center',
-  },
-  summaryTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  summaryText: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: strongColor,
-    marginBottom: 4,
-  },
-  summarySubtext: {
-    fontSize: 14,
-    color: '#10B981',
-    textAlign: 'center',
-    // marginBottom: 8,
-  },
-  pointsBreakdown: {
-    width: '100%',
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#333',
-  },
-  breakdownTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#B0B0B0',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  breakdownText: {
-    fontSize: 12,
-    color: '#B0B0B0',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  breakdownHighlight: {
-    fontSize: 12,
-    color: strongColor,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-
-  // Notifications Step
-  notificationOption: {
-    width: '100%',
-    marginBottom: 30,
-  },
-  notificationToggle: {
-    backgroundColor: lbgColor,
-    borderRadius: 16,
-    padding: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  toggleInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  toggleText: {
-    marginLeft: 20,
-    flex: 1,
-  },
-  toggleTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 4,
-  },
-  toggleSubtitle: {
-    fontSize: 14,
-    color: '#B0B0B0',
-  },
-  toggle: {
-    width: 50,
-    height: 28,
-    backgroundColor: '#333',
-    borderRadius: 14,
-    padding: 2,
-    justifyContent: 'center',
-  },
-  toggleActive: {
-    backgroundColor: strongColor,
-  },
-  toggleHandle: {
-    width: 24,
-    height: 24,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-  },
-  toggleHandleActive: {
-    alignSelf: 'flex-end',
-  },
-  notificationTypes: {
-    width: '100%',
-    backgroundColor: lbgColor,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-  },
-  notificationTypesTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#B0B0B0',
-    marginBottom: 16,
-  },
-  notificationType: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  notificationTypeText: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    marginLeft: 12,
-  },
-  privacyNote: {
-    fontSize: 12,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 16,
-  },
-
-  // Final Step - Creating Profile
-  creatingProfile: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  creatingProfileText: {
-    fontSize: 16,
-    color: '#B0B0B0',
-    marginTop: 20,
-    textAlign: 'center',
-  },
-
-  // Navigation
   navigationContainer: {
     flexDirection: 'row',
     padding: 20,
@@ -1429,12 +928,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: strongColor,
     marginLeft: 4,
+    fontFamily: defFontType,
   },
   nextButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
     marginRight: 4,
+    fontFamily: defFontType,
   },
   navButtonTextDisabled: {
     color: '#666',

@@ -287,11 +287,21 @@ export default function HomeScreen() {
   };
 
   const getTodayIndex = () => new Date().getDay();
-  const recordEvent = async (lockedIn: boolean) => {
-    if (!uid) return;
-
+  const recordEvent = async (lockedIn: boolean, timestamp?: number) => {
+    if (!uid) {
+      console.log('recordEvent skipped: no uid');
+      return;
+    }
+    if (
+      !lockedIn &&
+      lockedEvents.length > 0 &&
+      lockedEvents[lockedEvents.length - 1]?.lockedIn === false
+    ) {
+      console.log('Skipping duplicate false event');
+      return;
+    }
     const newEvent: LockedEvent = {
-      timestamp: Date.now(),
+      timestamp: timestamp ?? Date.now(),
       lockedIn,
     };
 
@@ -301,12 +311,15 @@ export default function HomeScreen() {
       await updateDoc(profileRef, {
         lockedEvents: arrayUnion(newEvent),
       });
-    } catch {
+      console.log('recordEvent success:', newEvent);
+    } catch (err) {
+      console.log('updateDoc failed, falling back to setDoc:', err);
       await setDoc(
         profileRef,
         { lockedEvents: [newEvent] },
         { merge: true }
       );
+      console.log('recordEvent fallback success:', newEvent);
     }
   };
   
@@ -358,7 +371,7 @@ export default function HomeScreen() {
     setHasInitialized(true);
 
     const animationDuration = 400;
-    const staggerDelay = 150;
+    const staggerDelay = 100;
 
     Animated.timing(welcomeAnimation, {
       toValue: 1,
@@ -439,38 +452,79 @@ export default function HomeScreen() {
 
 
 
+  const lastInactiveAtRef = useRef<number | null>(null);
+  const pendingFalseEventRef = useRef(false);
+  const isWritingFalseEventRef = useRef(false);
+  const pendingFalseTimestampRef = useRef<number | null>(null);
+
   useEffect(() => {
-    console.log('AppState effect registered'); 
-    let lastBackgroundTime: number | null = null;
-    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+    console.log('AppState effect registered');
+
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
       const prevState = appStateRef.current;
       console.log('AppState:', prevState, '->', nextAppState);
-      appStateRef.current = nextAppState;
-      if(nextAppState === 'inactive') {
-        lastBackgroundTime = Date.now();
-      }
-      let isLockScreen: boolean = true;
-      if (nextAppState === 'background' && lastBackgroundTime) {
-        const elapsed = Date.now() - lastBackgroundTime;
 
-        if (elapsed < 300) {
-          console.log('Probably lock screen'); //around 40-60
-        } else {
-          console.log('Probably home screen / app switch'); //around 600-700
-          
-          isLockScreen = false;
-          theButtonPressedRef.current = false;
-          setTheButtonPressed(false);
-          recordEvent(false);
+      // mark when app first becomes inactive
+      if (nextAppState === 'inactive') {
+        lastInactiveAtRef.current = Date.now();
+      }
+
+      // decide whether this was likely app switch / home gesture
+      if (prevState === 'inactive' && nextAppState === 'background') {
+        const inactiveAt = lastInactiveAtRef.current;
+        const elapsed = inactiveAt ? Date.now() - inactiveAt : null;
+
+        if (elapsed !== null) {
+          if (elapsed < 300) {
+            console.log('Probably lock screen');
+          } else {
+            console.log('Probably home screen / app switch');
+
+            // immediately update UI locally
+            theButtonPressedRef.current = false;
+            setTheButtonPressed(false);
+
+            // defer the Firestore write until app is active again
+            pendingFalseEventRef.current = true;
+            pendingFalseTimestampRef.current = Date.now(); // ← capture leave time
+          }
         }
       }
 
-      
+      // once app becomes active again, flush the pending false event
+      if (
+        (prevState === 'background' || prevState === 'inactive') &&
+        nextAppState === 'active'
+      ) {
+        if (pendingFalseEventRef.current && !isWritingFalseEventRef.current) {
+          isWritingFalseEventRef.current = true;
+
+          try {
+            await recordEvent(
+              false,
+              pendingFalseTimestampRef.current ?? undefined
+            );
+
+            console.log('Flushed pending lockedIn:false event on return to active');
+
+            // ✅ CLEAR BOTH FLAGS HERE
+            pendingFalseEventRef.current = false;
+            pendingFalseTimestampRef.current = null;
+
+          } catch (e) {
+            console.error('Failed to flush pending lockedIn:false event', e);
+          } finally {
+            isWritingFalseEventRef.current = false;
+          }
+        }
+      }
+
+      appStateRef.current = nextAppState;
     };
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription.remove();
-  }, []);
+  }, [uid]);
 
   // useEffect(() => {
   //   const unsub = onAuthStateChanged(auth, (user) => {
@@ -1338,7 +1392,7 @@ export default function HomeScreen() {
                 </Animated.View>
               </View>
 
-              <Animated.View style={[getAnimatedStyle(statsAnimation), styles.userStatsContainer]}>
+              {/*<Animated.View style={[getAnimatedStyle(statsAnimation), styles.userStatsContainer]}>
                 <Text style={styles.userStatsTitle}>Your Stats</Text>
 
                 <View style={styles.statsGrid}>
@@ -1352,7 +1406,7 @@ export default function HomeScreen() {
                     </View>
                   ))}
                 </View>
-              </Animated.View>
+              </Animated.View>*/}
             </>
           )}
         </View>

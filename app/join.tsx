@@ -428,19 +428,22 @@ export default function CompetitionCodesScreen() {
     createAnimation.setValue(0);
     setHasInitialized(true);
 
+    const animationDuration = 250;
+    const staggerDelay = 100;
+
     Animated.timing(joinAnimation, {
       toValue: 1,
-      duration: 0,
+      duration: animationDuration,
       useNativeDriver: true,
     }).start();
 
     setTimeout(() => {
       Animated.timing(createAnimation, {
         toValue: 1,
-        duration: 0,
+        duration: animationDuration,
         useNativeDriver: true,
       }).start();
-    }, 0);
+    }, staggerDelay);
   };
 
   useEffect(() => {
@@ -469,11 +472,11 @@ export default function CompetitionCodesScreen() {
   });
 
   if (!hasInitialized) {
-    return <SafeAreaView style={styles.container} />;
+    return <SafeAreaView style={styles.screen} />;
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: bgColor }}>
+    <SafeAreaView style={styles.screen}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={[styles.container, { flexGrow: 1 }]}
@@ -670,6 +673,10 @@ export default function CompetitionCodesScreen() {
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: bgColor,
+  },
   bottomFade: {
     position: 'absolute',
     left: 0,

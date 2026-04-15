@@ -1,36 +1,122 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { doc, onSnapshot } from 'firebase/firestore';
-import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { collection, doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  Animated,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { firestore } from '../firebase';
 import { useUser } from './_layout';
 
-const dbgColor = "#0a0513ff"; //dark background
-const bgColor = "#111124ff"; //background
-const lbgColor = "#322f4e81"; //light background
-const l2bgColor = "#322f4eff"; //2nd light background
+const dbgColor = "#0a0513ff";
+const bgColor = "#111124ff";
+const lbgColor = "#322f4e81";
+const l2bgColor = "#322f4eff";
 const l3bgColor = "#323150";
-const strongColor = "#cc7bdbff"; //strong color
+const strongColor = "#cc7bdbff";
 
 const warmFontType = "Molengo";
 const defFontType = "OpenSansSemiBold";
 
 interface UserProfile {
-  avgbedtime: number;
-  name: string;
-  numdays: number;
-  pastcomps: Array<{
-    date: string;
-    money: number;
-    points: number;
-    rank: number;
-    won: boolean;
-  }>;
+  name?: string;
+  totalLockedMinutes?: number;
+  thisWeekLockedMinutes?: number;
 }
 
-// Reset Button Component - moved from _layout.tsx
+type WinType = 'number' | 'percentage' | 'team';
+
+interface Competition {
+  id: string;
+  name: string;
+  start: number;
+  end: number;
+  reward?: string;
+  winType?: WinType;
+  winVal?: number;
+  players: Record<string, { points?: number; joinedAt?: any; name?: string }>;
+}
+interface FinishedCompetitionEntry {
+  id: string;
+  name: string;
+  start: number;
+  end: number;
+  points: number;
+  rank: number;
+  totalPlayers: number;
+  reward?: string;
+  winType?: WinType;
+  winVal?: number;
+  isWinner: boolean;
+}
+type LeaderboardEntry = {
+  uid: string;
+  name: string;
+  points: number;
+  rank: number;
+  isUser: boolean;
+  isWinner: boolean;
+};
+
+function getRankedLeaderboard(
+  players: Record<string, { points?: number; joinedAt?: any; name?: string }> | undefined,
+  winType: WinType | undefined,
+  winVal: number | undefined,
+  myUid?: string
+): LeaderboardEntry[] {
+  const entries = Object.entries(players ?? {}).map(([uid, pdata]) => ({
+    uid,
+    name: uid === myUid ? 'You' : pdata.name ?? 'Player',
+    points: pdata?.points ?? 0,
+    isUser: uid === myUid,
+  }));
+
+  entries.sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    const aJoined = players?.[a.uid]?.joinedAt ?? 0;
+    const bJoined = players?.[b.uid]?.joinedAt ?? 0;
+    return aJoined - bJoined;
+  });
+
+  let rank = 0;
+  let prevPoints: number | null = null;
+
+  const ranked = entries.map((entry, index) => {
+    if (prevPoints === null || entry.points !== prevPoints) {
+      rank = index + 1;
+      prevPoints = entry.points;
+    }
+    return { ...entry, rank, isWinner: false };
+  });
+
+  if (winType === 'number') {
+    const cutoff = Math.max(1, winVal ?? 0);
+    return ranked.map((e) => ({ ...e, isWinner: e.rank <= cutoff }));
+  }
+
+  if (winType === 'percentage') {
+    const pct = Math.max(1, Math.min(100, winVal ?? 0));
+    const winnerCount = Math.max(1, Math.ceil((ranked.length * pct) / 100));
+    return ranked.map((e) => ({ ...e, isWinner: e.rank <= winnerCount }));
+  }
+
+  if (winType === 'team') {
+    const goal = Math.max(1, winVal ?? 0);
+    const teamWon = ranked.reduce((sum, e) => sum + e.points, 0) >= goal;
+    return ranked.map((e) => ({ ...e, isWinner: teamWon }));
+  }
+
+  return ranked;
+}
 interface ResetButtonProps {
   style?: any;
   buttonStyle?: any;
@@ -39,7 +125,7 @@ interface ResetButtonProps {
   title?: string;
 }
 
-const ResetButton: React.FC<ResetButtonProps> = ({ 
+const ResetButton: React.FC<ResetButtonProps> = ({
   style,
   buttonStyle,
   textStyle,
@@ -49,23 +135,15 @@ const ResetButton: React.FC<ResetButtonProps> = ({
   const { resetToOnboarding } = useUser();
 
   const handleReset = () => {
-    console.log('Reset button pressed');
     Alert.alert(
       "Logout",
       "Are you sure you want to log out?",
       [
-        {
-          text: "Cancel",
-          style: "cancel",
-          onPress: () => console.log('Logout cancelled')
-        },
+        { text: "Cancel", style: "cancel" },
         {
           text: "Logout",
           style: "destructive",
-          onPress: () => {
-            console.log('User confirmed reset');
-            resetToOnboarding();
-          }
+          onPress: () => resetToOnboarding()
         }
       ]
     );
@@ -73,8 +151,8 @@ const ResetButton: React.FC<ResetButtonProps> = ({
 
   return (
     <View style={[resetStyles.container, style]}>
-      <TouchableOpacity 
-        style={[resetStyles.resetButton, buttonStyle]} 
+      <TouchableOpacity
+        style={[resetStyles.resetButton, buttonStyle]}
         onPress={handleReset}
       >
         {showIcon && (
@@ -86,77 +164,257 @@ const ResetButton: React.FC<ResetButtonProps> = ({
   );
 };
 
-export default function ProfileScreen() {
-  const {userData, setUserData} = useUser();
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+function getCompetitionStatus(start: number, end: number): 'ongoing' | 'upcoming' | 'finished' {
+  const now = Date.now();
+  if (now < start) return 'upcoming';
+  if (now > end) return 'finished';
+  return 'ongoing';
+}
 
-  // Animation references
+function formatDateRange(startMs: number, endMs: number) {
+  const start = new Date(startMs);
+  const end = new Date(endMs);
+
+  const startFormatted = start.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
+
+  const endFormatted = end.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
+
+  return `${startFormatted} - ${endFormatted}`;
+}
+
+function getRank(players: Record<string, { points?: number }>, uid: string): number {
+  const sorted = Object.entries(players)
+    .map(([playerUid, data]) => ({
+      uid: playerUid,
+      points: data?.points ?? 0,
+    }))
+    .sort((a, b) => b.points - a.points);
+
+  return sorted.findIndex((p) => p.uid === uid) + 1;
+}
+
+export default function ProfileScreen() {
+  const { userData, setUserData } = useUser();
+
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [competitions, setCompetitions] = useState<Competition[]>([]);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [isLoadingCompetitions, setIsLoadingCompetitions] = useState(true);
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [isSavingName, setIsSavingName] = useState(false);
+
   const titleAnimation = useRef(new Animated.Value(0)).current;
   const statsAnimation = useRef(new Animated.Value(0)).current;
   const competitionsAnimation = useRef(new Animated.Value(0)).current;
-  const competitionAnimations = useRef<Animated.Value[]>([]).current;
   const resetButtonAnimation = useRef(new Animated.Value(0)).current;
-  
-  // Track if this is the initial render to prevent flash
+  const nameEditorAnimation = useRef(new Animated.Value(0)).current;
+  const competitionAnimations = useRef<Animated.Value[]>([]).current;
+
   const [hasInitialized, setHasInitialized] = useState(false);
 
-  
+  const [scrollY, setScrollY] = useState(0);
+  const [layoutHeight, setLayoutHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
 
-  // Initialize competition animations
+  const showBottomFade =
+    contentHeight > layoutHeight &&
+    scrollY + layoutHeight < contentHeight - 8;
+
   useEffect(() => {
-    if (userProfile?.pastcomps) {
-      // Clear existing animations
-      competitionAnimations.length = 0;
-      // Create new animations for each competition
-      userProfile.pastcomps.forEach(() => {
-        competitionAnimations.push(new Animated.Value(0));
-      });
-    }
-  }, [userProfile?.pastcomps]);
+    if (!userData?.uid) return;
 
-  // Animation trigger function
+    const userDocRef = doc(firestore, 'profiledb', userData.uid);
+
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          const data = docSnapshot.data() as UserProfile;
+          setUserProfile(data);
+          setNameInput(data?.name || userData?.name || '');
+        } else {
+          setUserProfile(null);
+          setNameInput(userData?.name || '');
+        }
+        setIsLoadingProfile(false);
+      },
+      (error) => {
+        console.error('Error fetching user profile:', error);
+        setIsLoadingProfile(false);
+      }
+    );
+
+    return unsubscribe;
+  }, [userData?.uid]);
+
+  useEffect(() => {
+    if (!userData?.uid) return;
+
+    const competitionsRef = collection(firestore, 'competitiondb');
+
+    const unsubscribe = onSnapshot(
+      competitionsRef,
+      (snapshot) => {
+        const comps: Competition[] = [];
+
+        snapshot.forEach((docSnap) => {
+          const cur = docSnap.data() as any;
+          if (!cur?.start || !cur?.end || !cur?.players || typeof cur.players !== 'object') return;
+
+          comps.push({
+            id: docSnap.id,
+            name: cur.name ?? 'Untitled Competition',
+            start: cur.start,
+            end: cur.end,
+            reward: cur.reward,
+            winType: cur.winType,
+            winVal: cur.winVal,
+            players: cur.players,
+          });
+        });
+
+        setCompetitions(comps);
+        setIsLoadingCompetitions(false);
+      },
+      (error) => {
+        console.error('Error fetching competitions:', error);
+        setIsLoadingCompetitions(false);
+      }
+    );
+
+    return unsubscribe;
+  }, [userData?.uid]);
+
+  const finishedCompetitions = useMemo(() => {
+    if (!userData?.uid) return [];
+
+    return competitions
+      .filter((comp) => {
+        const joined = !!comp.players?.[userData.uid];
+        return joined && getCompetitionStatus(comp.start, comp.end) === 'finished';
+      })
+      .map((comp) => {
+        const leaderboard = getRankedLeaderboard(
+          comp.players,
+          comp.winType,
+          comp.winVal,
+          userData.uid
+        );
+
+        const myEntry = leaderboard.find((entry) => entry.uid === userData.uid);
+
+        return {
+          id: comp.id,
+          name: comp.name,
+          start: comp.start,
+          end: comp.end,
+          points: comp.players?.[userData.uid]?.points ?? 0,
+          rank: myEntry?.rank ?? 0,
+          totalPlayers: Object.keys(comp.players || {}).length,
+          reward: comp.reward,
+          winType: comp.winType,
+          winVal: comp.winVal,
+          isWinner: myEntry?.isWinner ?? false,
+        };
+      })
+      .sort((a, b) => b.end - a.end);
+  }, [competitions, userData?.uid]);
+
+  useEffect(() => {
+    competitionAnimations.length = 0;
+    finishedCompetitions.forEach(() => {
+      competitionAnimations.push(new Animated.Value(0));
+    });
+  }, [finishedCompetitions.length]);
+
+  const stats = useMemo(() => {
+    const totalCompetitions = finishedCompetitions.length;
+
+    const bestRank =
+      totalCompetitions > 0
+        ? Math.min(...finishedCompetitions.map((c) => c.rank))
+        : null;
+
+    const wins = finishedCompetitions.filter((c) => c.isWinner).length;
+
+    const winRate =
+      totalCompetitions > 0
+        ? Math.round((wins / totalCompetitions) * 100)
+        : 0;
+
+    const avgRank =
+      totalCompetitions > 0
+        ? (
+            finishedCompetitions.reduce((sum, c) => sum + c.rank, 0) / totalCompetitions
+          ).toFixed(1)
+        : null;
+
+    const totalCompetitionPoints = finishedCompetitions.reduce(
+      (sum, c) => sum + c.points,
+      0
+    );
+
+    return {
+      totalCompetitions,
+      bestRank,
+      wins,
+      winRate,
+      avgRank,
+      totalCompetitionPoints,
+    };
+  }, [finishedCompetitions]);
+
   const startAnimations = () => {
-    // Reset all animations to 0 first to prevent any flash
     titleAnimation.setValue(0);
     statsAnimation.setValue(0);
+    nameEditorAnimation.setValue(0);
     competitionsAnimation.setValue(0);
-    competitionAnimations.forEach(anim => anim.setValue(0));
     resetButtonAnimation.setValue(0);
+    competitionAnimations.forEach((anim) => anim.setValue(0));
 
-    // Mark as initialized to show content
     setHasInitialized(true);
 
-    // Staggered animation sequence
-    //const animationDuration = 400;
-    //const staggerDelay = 150;
-    const animationDuration = 0;
-    const staggerDelay = 0;
+    const animationDuration = 220;
+    const staggerDelay = 90;
 
-    // Title (first)
     Animated.timing(titleAnimation, {
       toValue: 1,
       duration: animationDuration,
       useNativeDriver: true,
     }).start();
 
-    // Stats (second)
+    setTimeout(() => {
+      Animated.timing(nameEditorAnimation, {
+        toValue: 1,
+        duration: animationDuration,
+        useNativeDriver: true,
+      }).start();
+    }, staggerDelay);
+
     setTimeout(() => {
       Animated.timing(statsAnimation, {
         toValue: 1,
         duration: animationDuration,
         useNativeDriver: true,
       }).start();
-    }, staggerDelay);
-    // Reset button (3rd)
-      setTimeout(() => {
-        Animated.timing(resetButtonAnimation, {
-          toValue: 1,
-          duration: animationDuration,
-          useNativeDriver: true,
-        }).start();
-      }, staggerDelay * 2);
-    // Competitions section header (4th)
+    }, staggerDelay * 2);
+
+    setTimeout(() => {
+      Animated.timing(resetButtonAnimation, {
+        toValue: 1,
+        duration: animationDuration,
+        useNativeDriver: true,
+      }).start();
+    }, staggerDelay * 3);
+
     setTimeout(() => {
       Animated.timing(competitionsAnimation, {
         toValue: 1,
@@ -164,7 +422,6 @@ export default function ProfileScreen() {
         useNativeDriver: true,
       }).start();
 
-      // Animate each competition card one by one with staggered delays
       competitionAnimations.forEach((anim, index) => {
         setTimeout(() => {
           Animated.timing(anim, {
@@ -172,115 +429,77 @@ export default function ProfileScreen() {
             duration: animationDuration,
             useNativeDriver: true,
           }).start();
-        }, staggerDelay * (index + 1)); // Stagger each competition
+        }, 70 * index);
       });
-    }, staggerDelay * 3);
+    }, staggerDelay * 4);
   };
 
-  // Animation style generator
   const getAnimatedStyle = (animationValue: Animated.Value) => ({
     opacity: animationValue,
     transform: [
       {
         translateY: animationValue.interpolate({
           inputRange: [0, 1],
-          outputRange: [30, 0], // Start 30 pixels down, move to original position
+          outputRange: [24, 0],
         }),
       },
     ],
   });
 
   useEffect(() => {
-    if (userData?.uid) {
-      const userDocRef = doc(firestore, 'profiledb', userData.uid);
-      
-      // Set up real-time listener for user profile
-      const unsubscribe = onSnapshot(userDocRef, 
-        (docSnapshot) => {
-          if (docSnapshot.exists()) {
-            const profileData = docSnapshot.data() as UserProfile;
-            setUserProfile(profileData);
-          } else {
-            console.log('User profile not found');
-          }
-          setIsLoading(false);
-        },
-        (error) => {
-          console.error('Error fetching user profile:', error);
-          setIsLoading(false);
-        }
-      );
-
-      return () => unsubscribe();
+    if (!isLoadingProfile && !isLoadingCompetitions && userData) {
+      setTimeout(() => startAnimations(), 100);
     }
-  }, [userData?.uid]);
+  }, [isLoadingProfile, isLoadingCompetitions, userData, finishedCompetitions.length]);
 
-  // Start animations when loading is complete and data is available
-  useEffect(() => {
-    if (!isLoading && userData) {
-      // Small delay to ensure everything is rendered
-      setTimeout(() => {
-        startAnimations();
-      }, 100);
-    }
-  }, [isLoading, userData]);
-
-  // Trigger animations whenever the screen comes into focus (tab navigation)
   useFocusEffect(
     React.useCallback(() => {
-      if (!isLoading && userData) {
-        // Reset hasInitialized to ensure proper animation flow
+      if (!isLoadingProfile && !isLoadingCompetitions && userData) {
         setHasInitialized(false);
-        // Small delay to ensure everything is rendered
-        setTimeout(() => {
-          startAnimations();
-        }, 50); // Reduced delay to minimize flash
+        setTimeout(() => startAnimations(), 50);
       }
-    }, [isLoading, userData])
+    }, [isLoadingProfile, isLoadingCompetitions, userData, finishedCompetitions.length])
   );
 
-  // Calculate stats from userProfile data
-  const calculateStats = () => {
-    if (!userProfile?.pastcomps) {
-      return {
-        totalWinnings: 0,
-        winRate: 0,
-        totalCompetitions: 0,
-        wins: 0
-      };
+  const saveName = async () => {
+    const trimmed = nameInput.trim();
+
+    if (!userData?.uid) return;
+
+    if (!trimmed) {
+      Alert.alert('Invalid name', 'Please enter a name.');
+      return;
     }
 
-    const pastComps = userProfile.pastcomps;
-    const totalCompetitions = pastComps.length;
-    const wins = pastComps.filter(comp => comp.won).length;
-    const totalWinnings = pastComps.reduce((sum, comp) => sum + Number(comp.money), 0);
-    const winRate = totalCompetitions > 0 ? Math.round((wins / totalCompetitions) * 100) : 0;
-
-    return {
-      totalWinnings,
-      winRate,
-      totalCompetitions,
-      wins
-    };
-  };
-
-  const stats = calculateStats();
-
-  const formatCurrency = (amount: number) => {
-    if (amount < 0) {
-      return `-\$${Math.abs(amount)}`;
+    if (trimmed.length > 30) {
+      Alert.alert('Name too long', 'Please keep your name under 30 characters.');
+      return;
     }
-    return `+\$${amount}`;
+
+    setIsSavingName(true);
+
+    try {
+      await updateDoc(doc(firestore, 'profiledb', userData.uid), {
+        name: trimmed,
+      });
+
+      if (setUserData) {
+        setUserData({
+          ...userData,
+          name: trimmed,
+        });
+      }
+
+      setIsEditingName(false);
+    } catch (error) {
+      console.error('Failed to update name:', error);
+      Alert.alert('Error', 'Could not update your name.');
+    } finally {
+      setIsSavingName(false);
+    }
   };
 
-  const formatDate = (dateString: string) => {
-    // Assuming the date format from Firebase might need formatting
-    // You can adjust this based on your actual date format
-    return dateString;
-  };
-
-  // Show loading state
-  if (isLoading || !userData) {
+  if (isLoadingProfile || isLoadingCompetitions || !userData) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -291,118 +510,203 @@ export default function ProfileScreen() {
     );
   }
 
+  const displayName = userProfile?.name || userData?.name || 'User';
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={true}
+        onLayout={(e) => setLayoutHeight(e.nativeEvent.layout.height)}
+        onContentSizeChange={(_, h) => setContentHeight(h)}
+        onScroll={(e) => setScrollY(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
+      >
         <View style={styles.content}>
-          {/* Only render content after initialization to prevent flash */}
           {hasInitialized && (
             <>
-              {/* Animated Title */}
               <Animated.View style={getAnimatedStyle(titleAnimation)}>
                 <Text style={styles.title}>
-                  <Text style={styles.username}>{userProfile?.name || userData?.name || 'User'}</Text><Text style={styles.username}>'s</Text> Profile
+                  <Text style={styles.username}>{displayName}</Text>
+                  <Text style={styles.username}>'s</Text> Profile
                 </Text>
               </Animated.View>
-              
-              {/* Animated Stats Overview */}
+
+              <Animated.View style={[getAnimatedStyle(nameEditorAnimation), styles.nameEditorCard]}>
+                <Text style={styles.sectionMiniTitle}>Display Name: {displayName}</Text>
+
+                {isEditingName ? (
+                  <>
+                    <TextInput
+                      value={nameInput}
+                      onChangeText={setNameInput}
+                      placeholder="Enter your name"
+                      placeholderTextColor="#8A8A8A"
+                      style={styles.nameInput}
+                      maxLength={30}
+                    />
+
+                    <View style={styles.nameButtonRow}>
+                      <TouchableOpacity
+                        style={[styles.smallButton, styles.cancelButton]}
+                        onPress={() => {
+                          setNameInput(displayName);
+                          setIsEditingName(false);
+                        }}
+                        disabled={isSavingName}
+                      >
+                        <Text style={styles.smallButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.smallButton, styles.saveButton]}
+                        onPress={saveName}
+                        disabled={isSavingName}
+                      >
+                        <Text style={styles.smallButtonText}>
+                          {isSavingName ? 'Saving...' : 'Save Name'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.editNameButton}
+                    onPress={() => setIsEditingName(true)}
+                  >
+                    <Ionicons name="create-outline" size={18} color={strongColor} />
+                    <Text style={styles.editNameText}>Edit Name</Text>
+                  </TouchableOpacity>
+                )}
+              </Animated.View>
+
               <Animated.View style={[getAnimatedStyle(statsAnimation), styles.statsContainer]}>
                 <View style={styles.statCard}>
                   <View style={styles.iconContainer}>
-                    <Ionicons name="cash" size={28} color={strongColor} />
+                    <Ionicons name="trophy" size={28} color={strongColor} />
                   </View>
-                  <Text style={styles.statValue}>${stats.totalWinnings}</Text>
-                  <Text style={styles.statLabel}>Total Winnings</Text>
+                  <Text style={styles.statValue}>{stats.totalCompetitions}</Text>
+                  <Text style={styles.statLabel}>Finished Competitions</Text>
                 </View>
-                
+
                 <View style={styles.statCard}>
                   <View style={styles.iconContainer}>
-                    <Ionicons name="trending-up" size={28} color={strongColor} />
+                    <Ionicons name="medal-outline" size={28} color={strongColor} />
                   </View>
-                  <Text style={styles.statValue}>{stats.winRate}%</Text>
-                  <Text style={styles.statLabel}>Win Rate</Text>
+                  <Text style={styles.statValue}>{stats.wins}</Text>
+                  <Text style={styles.statLabel}>Wins</Text>          
                 </View>
               </Animated.View>
-              {/* Animated Reset Button */}
-              <Animated.View style={[getAnimatedStyle(resetButtonAnimation), styles.resetContainer]}>
-                <ResetButton 
-                  title="Logout"
-                  style={{ marginBottom: 20 }}
-                />
+
+              <Animated.View style={[getAnimatedStyle(statsAnimation), styles.statsContainer]}>
+                <View style={styles.statCard}>
+                  <View style={styles.iconContainer}>
+                    <Ionicons name="bar-chart" size={28} color={strongColor} />
+                  </View>
+                  <Text style={styles.statValue}>{stats.avgRank ?? 'N/A'}</Text>
+                  <Text style={styles.statLabel}>Average Rank</Text>
+                </View>
+
+                <View style={styles.statCard}>
+                  <View style={styles.iconContainer}>
+                    <Ionicons name="star" size={28} color={strongColor} />
+                  </View>
+                  <Text style={styles.statValue}>{stats.totalCompetitionPoints}</Text>
+                  <Text style={styles.statLabel}>Total Finished Competition Points</Text>
+                </View>
               </Animated.View>
-              {/* Animated Past Competitions Section Header */}
+
+              <Animated.View style={[getAnimatedStyle(resetButtonAnimation), styles.resetContainer]}>
+                <ResetButton title="Logout" style={{ marginBottom: 20 }} />
+              </Animated.View>
+
               <Animated.View style={getAnimatedStyle(competitionsAnimation)}>
                 <View style={styles.competitionsSection}>
                   <Text style={styles.sectionTitle}>Past Competitions</Text>
-                  
-                  {userProfile?.pastcomps && userProfile.pastcomps.length > 0 ? (
-                    userProfile.pastcomps
-                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) // Sort by most recent first
-                      .map((competition, index) => (
-                        <Animated.View 
-                          key={`${competition.date}-${index}`}
-                          style={[
-                            styles.competitionCard,
-                            { backgroundColor: competition.won ? '#0F2419' : '#2D1B1B' },
-                            getAnimatedStyle(competitionAnimations[index] || new Animated.Value(1))
-                          ]}
-                        >
-                          <View style={styles.competitionHeader}>
-                            <Text style={styles.competitionWeek}>{formatDate(competition.date)}</Text>
-                            <Text style={styles.competitionRank}>Rank #{competition.rank}</Text>
-                          </View>
-                          
-                          <View style={styles.competitionDetails}>
-                            <Text style={styles.competitionPoints}>Points: {competition.points}</Text>
-                          </View>
-                          
-                          <View style={styles.competitionFooter}>
-                            <View style={styles.earningsContainer}>
-                              <Text style={[
-                                styles.earnings,
-                                { color: competition.won ? '#10B981' : '#EF4444' }
-                              ]}>
-                                {formatCurrency(competition.money)}
-                              </Text>
-                            </View>
-                            
-                            <View style={[
+
+                  {finishedCompetitions.length > 0 ? (
+                    finishedCompetitions.map((competition, index) => (
+                      <Animated.View
+                        key={competition.id}
+                        style={[
+                          styles.competitionCard,
+                          getAnimatedStyle(
+                            competitionAnimations[index] || new Animated.Value(1)
+                          ),
+                        ]}
+                      >
+                        <View style={styles.competitionHeader}>
+                          <Text style={styles.competitionWeek}>{competition.name}</Text>
+                          <Text style={styles.competitionRank}>
+                            Rank #{competition.rank} / {competition.totalPlayers}
+                          </Text>
+                        </View>
+
+                        <Text style={styles.competitionDate}>
+                          {formatDateRange(competition.start, competition.end)}
+                        </Text>
+
+                        <View style={styles.competitionFooter}>
+                          <Text style={styles.competitionPoints}>
+                            Points: {competition.points}
+                          </Text>
+
+                          <View
+                            style={[
                               styles.statusBadge,
-                              { backgroundColor: competition.won ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }
-                            ]}>
-                              <Ionicons 
-                                name={competition.won ? "trophy" : "close-circle"} 
-                                size={16} 
-                                color={competition.won ? '#10B981' : '#EF4444'} 
-                              />
-                              <Text style={[
+                              competition.isWinner
+                                ? { backgroundColor: 'rgba(16, 185, 129, 0.15)' }
+                                : { backgroundColor: 'rgba(239, 68, 68, 0.15)' },
+                            ]}
+                          >
+                            <Ionicons
+                              name={competition.isWinner ? 'trophy' : 'close-circle'}
+                              size={16}
+                              color={competition.isWinner ? '#10B981' : '#EF4444'}
+                            />
+                            <Text
+                              style={[
                                 styles.statusText,
-                                { color: competition.won ? '#10B981' : '#EF4444' }
-                              ]}>
-                                {competition.won ? 'Won' : 'Lost'}
-                              </Text>
-                            </View>
+                                { color: competition.isWinner ? '#10B981' : '#EF4444' },
+                              ]}
+                            >
+                              {competition.isWinner ? 'Won' : 'Lost'}
+                            </Text>
                           </View>
-                        </Animated.View>
-                      ))
+                        </View>
+                      </Animated.View>
+                    ))
                   ) : (
                     <View style={styles.emptyState}>
                       <Ionicons name="trophy-outline" size={48} color="#666666" />
-                      <Text style={styles.emptyStateText}>No competitions yet</Text>
-                      <Text style={styles.emptyStateSubtext}>Join your first competition to see your history here!</Text>
+                      <Text style={styles.emptyStateText}>No finished competitions yet</Text>
+                      <Text style={styles.emptyStateSubtext}>
+                        Once you finish a competition, it will show up here.
+                      </Text>
                     </View>
                   )}
                 </View>
               </Animated.View>
             </>
           )}
-          
         </View>
-        
       </ScrollView>
+      {showBottomFade && (
+      <LinearGradient
+        colors={[
+          'transparent',
+          'rgba(17,17,36,0.6)',
+          'rgba(17,17,36,0.9)',
+          '#111124'
+        ]}
+        pointerEvents="none"
+        style={styles.bottomFade}
+      />
+    )}
     </SafeAreaView>
   );
-};
+}
+
 const resetStyles = StyleSheet.create({
   container: {
     alignItems: 'center',
@@ -418,7 +722,6 @@ const resetStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FF4444',
     gap: 8,
-    fontFamily: defFontType,
   },
   resetText: {
     color: '#FF4444',
@@ -427,10 +730,18 @@ const resetStyles = StyleSheet.create({
     fontFamily: defFontType,
   },
 });
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: bgColor,
+  },
+  bottomFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 110,
   },
   loadingContainer: {
     flex: 1,
@@ -449,24 +760,83 @@ const styles = StyleSheet.create({
   content: {
     padding: 20,
     paddingTop: 40,
+    paddingBottom: 40,
   },
   title: {
     fontSize: 36,
     fontWeight: '300',
     color: '#FFFFFF',
-    marginBottom: 30,
+    marginBottom: 24,
     textAlign: 'center',
-    fontFamily: warmFontType
+    fontFamily: warmFontType,
   },
   username: {
     fontWeight: '600',
     color: strongColor,
     fontFamily: warmFontType,
   },
+  nameEditorCard: {
+    backgroundColor: lbgColor,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+  },
+  sectionMiniTitle: {
+    fontSize: 14,
+    color: '#B0B0B0',
+    marginBottom: 12,
+    fontFamily: defFontType,
+  },
+  nameInput: {
+    backgroundColor: l2bgColor,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: defFontType,
+    borderWidth: 1,
+    borderColor: strongColor,
+  },
+  nameButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 12,
+    gap: 10,
+  },
+  smallButton: {
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  cancelButton: {
+    backgroundColor: '#2A2A2A',
+  },
+  saveButton: {
+    backgroundColor: strongColor,
+  },
+  smallButtonText: {
+    color: '#FFFFFF',
+    fontFamily: defFontType,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  editNameButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 8,
+  },
+  editNameText: {
+    color: strongColor,
+    fontFamily: defFontType,
+    fontSize: 15,
+    fontWeight: '600',
+  },
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 30,
+    marginBottom: 18,
   },
   statCard: {
     flex: 1,
@@ -514,6 +884,7 @@ const styles = StyleSheet.create({
     fontFamily: defFontType,
   },
   competitionCard: {
+    backgroundColor: lbgColor,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -526,13 +897,15 @@ const styles = StyleSheet.create({
   competitionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 8,
+    gap: 12,
   },
   competitionWeek: {
+    flex: 1,
     fontSize: 16,
     color: '#FFFFFF',
-    fontWeight: '500',
+    fontWeight: '600',
     fontFamily: defFontType,
   },
   competitionRank: {
@@ -540,12 +913,15 @@ const styles = StyleSheet.create({
     color: '#B0B0B0',
     fontFamily: defFontType,
   },
-  competitionDetails: {
+  competitionDate: {
+    fontSize: 13,
+    color: '#9B9B9B',
     marginBottom: 12,
+    fontFamily: defFontType,
   },
   competitionPoints: {
-    fontSize: 14,
-    color: '#B0B0B0',
+    fontSize: 15,
+    color: '#FFFFFF',
     fontFamily: defFontType,
   },
   competitionFooter: {
@@ -553,25 +929,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  earningsContainer: {
-    flex: 1,
-  },
-  earnings: {
-    fontSize: 18,
-    fontWeight: '700',
-    fontFamily: defFontType,
-  },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
+    backgroundColor: 'rgba(157, 78, 221, 0.15)',
   },
   statusText: {
     fontSize: 12,
     fontWeight: '600',
     marginLeft: 4,
+    color: strongColor,
     fontFamily: defFontType,
   },
   emptyState: {
@@ -593,7 +963,7 @@ const styles = StyleSheet.create({
     fontFamily: defFontType,
   },
   resetContainer: {
-    marginTop: 20,
-    marginBottom: 40,
+    marginTop: 10,
+    marginBottom: 30,
   },
 });

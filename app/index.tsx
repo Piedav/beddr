@@ -287,19 +287,12 @@ export default function HomeScreen() {
   };
 
   const getTodayIndex = () => new Date().getDay();
-  const recordEvent = async (lockedIn: boolean, timestamp?: number) => {
+  const recordEvent = async (lockedIn: boolean, timestamp?: number): Promise<boolean> => {
     if (!uid) {
       console.log('recordEvent skipped: no uid');
-      return;
+      return false;
     }
-    if (
-      !lockedIn &&
-      lockedEvents.length > 0 &&
-      lockedEvents[lockedEvents.length - 1]?.lockedIn === false
-    ) {
-      console.log('Skipping duplicate false event');
-      return;
-    }
+
     const newEvent: LockedEvent = {
       timestamp: timestamp ?? Date.now(),
       lockedIn,
@@ -312,6 +305,7 @@ export default function HomeScreen() {
         lockedEvents: arrayUnion(newEvent),
       });
       console.log('recordEvent success:', newEvent);
+      return true;
     } catch (err) {
       console.log('updateDoc failed, falling back to setDoc:', err);
       await setDoc(
@@ -320,6 +314,7 @@ export default function HomeScreen() {
         { merge: true }
       );
       console.log('recordEvent fallback success:', newEvent);
+      return true;
     }
   };
   
@@ -450,13 +445,97 @@ export default function HomeScreen() {
   const theButtonPressedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
 
+  useEffect(() => {
+    if (!uid) return;
+    if (!pendingFalseEventRef.current) return;
 
+    flushPendingFalseEvent().catch(console.error);
+  }, [uid]);
 
   const lastInactiveAtRef = useRef<number | null>(null);
   const pendingFalseEventRef = useRef(false);
   const isWritingFalseEventRef = useRef(false);
   const pendingFalseTimestampRef = useRef<number | null>(null);
+  const markPendingLockOut = async (timestamp?: number) => {
+    if (!uid) return;
 
+    const profileRef = doc(firestore, 'profiledb', uid);
+
+    try {
+      await setDoc(
+        profileRef,
+        {
+          pendingLockOut: true,
+          pendingLockOutTimestamp: timestamp ?? Date.now(),
+        },
+        { merge: true }
+      );
+      console.log('Marked pending lock-out');
+    } catch (e) {
+      console.error('Failed to mark pending lock-out', e);
+    }
+  };
+  const flushPendingLockOutFromProfile = async (profileData?: any) => {
+    if (!uid) return false;
+    if (!profileData?.pendingLockOut) return false;
+    if (isWritingFalseEventRef.current) return false;
+
+    isWritingFalseEventRef.current = true;
+    const profileRef = doc(firestore, 'profiledb', uid);
+
+    try {
+      const ts =
+        typeof profileData?.pendingLockOutTimestamp === 'number'
+          ? profileData.pendingLockOutTimestamp
+          : Date.now();
+
+      await updateDoc(profileRef, {
+        lockedEvents: arrayUnion({
+          timestamp: ts,
+          lockedIn: false,
+        }),
+        pendingLockOut: false,
+        pendingLockOutTimestamp: null,
+      });
+
+      console.log('Flushed pending lock-out from profile');
+      return true;
+    } catch (e) {
+      console.error('Failed to flush pending lock-out from profile', e);
+      return false;
+    } finally {
+      isWritingFalseEventRef.current = false;
+    }
+  };
+  const flushPendingFalseEvent = async () => {
+    if (!pendingFalseEventRef.current) return;
+    if (isWritingFalseEventRef.current) return;
+    if (!uid) {
+      console.log('flushPendingFalseEvent: waiting for uid');
+      return;
+    }
+
+    isWritingFalseEventRef.current = true;
+
+    try {
+      const wrote = await recordEvent(
+        false,
+        pendingFalseTimestampRef.current ?? undefined
+      );
+
+      if (wrote) {
+        console.log('Flushed pending lockedIn:false event');
+        pendingFalseEventRef.current = false;
+        pendingFalseTimestampRef.current = null;
+      } else {
+        console.log('Pending false event not flushed yet; keeping pending flag');
+      }
+    } catch (e) {
+      console.error('Failed to flush pending lockedIn:false event', e);
+    } finally {
+      isWritingFalseEventRef.current = false;
+    }
+  };
   useEffect(() => {
     console.log('AppState effect registered');
 
@@ -485,8 +564,10 @@ export default function HomeScreen() {
             setTheButtonPressed(false);
 
             // defer the Firestore write until app is active again
+            const leaveTs = Date.now();
             pendingFalseEventRef.current = true;
-            pendingFalseTimestampRef.current = Date.now(); // ← capture leave time
+            pendingFalseTimestampRef.current = leaveTs;
+            await markPendingLockOut(leaveTs);
           }
         }
       }
@@ -496,27 +577,7 @@ export default function HomeScreen() {
         (prevState === 'background' || prevState === 'inactive') &&
         nextAppState === 'active'
       ) {
-        if (pendingFalseEventRef.current && !isWritingFalseEventRef.current) {
-          isWritingFalseEventRef.current = true;
-
-          try {
-            await recordEvent(
-              false,
-              pendingFalseTimestampRef.current ?? undefined
-            );
-
-            console.log('Flushed pending lockedIn:false event on return to active');
-
-            // ✅ CLEAR BOTH FLAGS HERE
-            pendingFalseEventRef.current = false;
-            pendingFalseTimestampRef.current = null;
-
-          } catch (e) {
-            console.error('Failed to flush pending lockedIn:false event', e);
-          } finally {
-            isWritingFalseEventRef.current = false;
-          }
-        }
+        await flushPendingFalseEvent();
       }
 
       appStateRef.current = nextAppState;
@@ -640,7 +701,9 @@ export default function HomeScreen() {
         if (docSnapshot.exists()) {
           const profileData = docSnapshot.data() as any;
           setUserProfile(profileData);
-
+          if (profileData?.pendingLockOut) {
+            flushPendingLockOutFromProfile(profileData).catch(console.error);
+          }
           const events = (profileData?.lockedEvents ?? []) as LockedEvent[];
           setLockedEvents(events);
 

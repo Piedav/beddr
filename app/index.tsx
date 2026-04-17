@@ -952,7 +952,7 @@ export default function HomeScreen() {
             <>
               <Animated.View style={getAnimatedStyle(welcomeAnimation)}>
                 <Text style={[styles.warmFont, styles.welcomeText]}>
-                  Welcome, <Text style={styles.username}>{userData?.name ?? 'User'}</Text>
+                  Welcome, <Text style={styles.username}>{userProfile?.name ?? userData?.name ?? 'User'}</Text>
                 </Text>
               </Animated.View>
 

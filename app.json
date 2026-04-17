@@ -49,7 +49,7 @@
         "expo-build-properties",
         {
           "ios": {
-            
+            "bundleIdentifier": "com.dmao.beddr"
           }
         }
       ]

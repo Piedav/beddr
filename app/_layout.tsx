@@ -88,16 +88,6 @@ function TabsLayout() { //the tabs at the bottom :))
         }}
       />
       <Tabs.Screen
-        name="log"
-        options={{
-          title: 'Log',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="clipboard-outline" size={size} color={color} />
-          ),
-          href: null,
-        }}
-      />
-      <Tabs.Screen
         name="join"
         options={{
           title: 'Join/Create',

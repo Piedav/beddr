@@ -1064,8 +1064,22 @@ export default function HomeScreen() {
                     </View>
                   </View> */}
                   <View style = {[styles.row, styles.competitionContainer]}>
-                    <Text style={styles.minutesText}>Lifetime locked in minutes: {formatMinutes(allTimeLockedMinutes)}</Text>
-                    <Text style={styles.minutesText}>This week locked in minutes: {formatMinutes(thisWeekLockedMinutes)}</Text>      
+                    {/* <Text style={styles.minutesText}>Lifetime locked in minutes: {formatMinutes(allTimeLockedMinutes)}</Text>
+                    <Text style={styles.minutesText}>This week locked in minutes: {formatMinutes(thisWeekLockedMinutes)}</Text>  */}
+                    <View style={styles.competitionStatBox}>
+                      
+                      <Text style={styles.dataNumber}>
+                        {formatMinutes(allTimeLockedMinutes)}
+                      </Text>
+                      <Text style={styles.competitionStatLabel}>lifetime time locked in</Text>
+                    </View>     
+                    <View style={styles.competitionStatBox}>
+                      
+                      <Text style={styles.dataNumber}>
+                        {formatMinutes(thisWeekLockedMinutes)}
+                      </Text>
+                      <Text style={styles.competitionStatLabel}>weekly time locked in</Text>
+                    </View>   
                   </View>
             
         {/* This is the button that toggles giving points and whanot*/}
@@ -1715,6 +1729,14 @@ const styles = StyleSheet.create({
   competitionStatNumber: {
     fontFamily: defFontType,
     fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  dataNumber: {
+    fontFamily: defFontType,
+    fontSize: 30,
     fontWeight: '700',
     color: '#FFFFFF',
     marginBottom: 4,

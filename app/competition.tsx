@@ -134,7 +134,35 @@ export default function CompetitionScreen() {
 
     return () => unsub();
   }, [competitionId]);
+  useEffect(() => {
+    const uids = Object.keys(competition?.players ?? {});
 
+    if (uids.length === 0) {
+      setPlayerNames({});
+      return;
+    }
+
+    const unsubscribers = uids.map((uid) =>
+      onSnapshot(
+        doc(firestore, 'profiledb', uid),
+        (snap) => {
+          const data = snap.exists() ? (snap.data() as any) : null;
+
+          setPlayerNames((prev) => ({
+            ...prev,
+            [uid]: data?.name?.trim() || 'Player',
+          }));
+        },
+        (err) => {
+          console.error(`profile name onSnapshot error for ${uid}:`, err);
+        }
+      )
+    );
+
+    return () => {
+      unsubscribers.forEach((unsub) => unsub());
+    };
+  }, [competition?.players]);
   useEffect(() => {
     if (!loading) {
       const t = setTimeout(startAnimations, 80);
@@ -193,7 +221,7 @@ export default function CompetitionScreen() {
   ): LeaderboardEntry[] => {
     const entries = Object.entries(players ?? {}).map(([uid, pdata]) => ({
       uid,
-      name: uid === myUid ? 'You' : pdata.name ?? 'Player',
+      name: uid === myUid ? 'You' : playerNames[uid] ?? pdata.name ?? 'Player',
       points: pdata?.points ?? 0,
       isUser: uid === myUid,
     }));
@@ -254,6 +282,7 @@ export default function CompetitionScreen() {
   const myStoredPoints = competition?.players?.[userData?.uid ?? '']?.points ?? 0;
   const totalPlayers = Object.keys(competition?.players ?? {}).length;
   const totalTeamPoints = rankedLeaderboard.reduce((sum, e) => sum + e.points, 0);
+  const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
 
   const winnerSummary = (() => {
     if (competition?.winType === 'number') {

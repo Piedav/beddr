@@ -80,7 +80,7 @@ function TabsLayout() { //the tabs at the bottom :))
       <Tabs.Screen
         name="competition"
         options={{
-          href: null, //hide it
+          //href: null, //hide it
           title: 'Competition',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="trophy" size={size} color={color} />

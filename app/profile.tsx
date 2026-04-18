@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { collection, doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { arrayUnion, collection, doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -132,19 +132,36 @@ const ResetButton: React.FC<ResetButtonProps> = ({
   showIcon = true,
   title = "Reset App"
 }) => {
-  const { resetToOnboarding } = useUser();
+  const { resetToOnboarding, userData } = useUser();
 
   const handleReset = () => {
     Alert.alert(
-      "Logout",
-      "Are you sure you want to log out?",
+      'Logout',
+      'Are you sure you want to log out?',
       [
-        { text: "Cancel", style: "cancel" },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: "Logout",
-          style: "destructive",
-          onPress: () => resetToOnboarding()
-        }
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (userData?.uid) {
+                const profileRef = doc(firestore, 'profiledb', userData.uid);
+
+                await updateDoc(profileRef, {
+                  lockedEvents: arrayUnion({
+                    timestamp: Date.now(),
+                    lockedIn: false,
+                  }),
+                });
+              }
+            } catch (error) {
+              console.error('Failed to record logout lock-out event:', error);
+            } finally {
+              resetToOnboarding();
+            }
+          },
+        },
       ]
     );
   };

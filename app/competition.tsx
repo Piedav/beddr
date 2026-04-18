@@ -370,7 +370,7 @@ export default function CompetitionScreen() {
           </View>
         </Animated.View>
 
-        {hasJoinedCompetition ? (
+        {hasJoinedCompetition && status != "upcoming" ? (
           <Animated.View style={[getAnimatedStyle(progressAnimation), styles.card]}>
             <Text style={styles.cardTitle}>Your Standing</Text>
 
@@ -401,13 +401,13 @@ export default function CompetitionScreen() {
           </Animated.View>
         ) : (
           <Animated.View style={[getAnimatedStyle(progressAnimation), styles.card]}>
-            <Text style={styles.cardTitle}>You haven’t joined this competition</Text>
+            <Text style={styles.cardTitle}>This Competition Has Not Started Yet</Text>
             <Text style={styles.cardBody}>
-              Join from the home screen or code page to start earning points.
+              {"Get ready for when it does :)"}
             </Text>
           </Animated.View>
         )}
-
+        {status != "upcoming" &&
         <Animated.View style={[getAnimatedStyle(contentAnimation), styles.card]}>
           <Text style={styles.cardTitle}>Leaderboard</Text>
 
@@ -442,7 +442,7 @@ export default function CompetitionScreen() {
             ))
           )}
         </Animated.View>
-
+    }
         
       </ScrollView>
     </SafeAreaView>
@@ -510,7 +510,7 @@ const styles = StyleSheet.create({
   },
   statusValue: {
     color: '#fff',
-    fontSize: 20,
+    fontSize: 15,
     fontFamily: defFontType,
   },
   statusLabel: {

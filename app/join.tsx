@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
+import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { arrayUnion, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -184,7 +185,16 @@ export default function CompetitionCodesScreen() {
   const [joinCode, setJoinCode] = useState('');
   const [creating, setCreating] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
+  const copyCode = async () => {
+    if (!generatedCode) return;
+
+    await Clipboard.setStringAsync(generatedCode);
+    setCopied(true);
+
+    setTimeout(() => setCopied(false), 1500);
+  };
   type WinType = 'number' | 'percentage' | 'team';
   const [competitionName, setCompetitionName] = useState('');
   const [reward, setReward] = useState('');
@@ -327,6 +337,7 @@ export default function CompetitionCodesScreen() {
       }
 
       const startMs = startOfDayMs(startDate);
+      //const startMs = Date.now() > startOfDayMs(startDate) ? Date.now() : startOfDayMs(startDate);
       const endMs = endOfDayMs(endDate);
 
       if (startMs > endMs) {
@@ -513,11 +524,15 @@ export default function CompetitionCodesScreen() {
         <Animated.View style={getAnimatedStyle(createAnimation)}>
           <View style={styles.card}>
             {generatedCode ? (
-              <View style={styles.codeBox}>
-                <Text style={styles.codeLabel}>Your code</Text>
-                <Text style={styles.codeValue}>{generatedCode}</Text>
-                <Text style={styles.hint}>Share this with friends so they can join.</Text>
-              </View>
+              <TouchableOpacity onPress={copyCode} activeOpacity={0.8}>
+                <View style={styles.codeBox}>
+                  <Text style={styles.codeLabel}>Your code</Text>
+                  <Text style={styles.codeValue}>{generatedCode}</Text>
+                  <Text style={styles.hint}>
+                    {copied ? 'Copied!' : 'Tap to copy • Share this with friends'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
             ) : null}
             <Text style={styles.title}>Create a New Competition</Text>
 

@@ -584,8 +584,9 @@ export default function HomeScreen() {
         const elapsed = inactiveAt ? Date.now() - inactiveAt : null;
 
         if (elapsed !== null) {
-          if (elapsed < 300) {
+          if (elapsed < 100) {
             console.log('Probably lock screen');
+            console.log(elapsed);
           } else {
             console.log('Probably home screen / app switch');
 
@@ -1164,7 +1165,7 @@ export default function HomeScreen() {
                       <Text style={styles.dataNumber}>
                         {formatMinutes(allTimeLockedMinutes)}
                       </Text>
-                      <Text style={styles.competitionStatLabel}>lifetime time locked in</Text>
+                      <Text style={styles.competitionStatLabel}>life time locked in</Text>
                     </View>     
                     <View style={styles.competitionStatBox}>
                       

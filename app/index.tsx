@@ -225,7 +225,23 @@ export default function HomeScreen() {
   const [allTimeLockedMinutes, setAllTimeLockedMinutes] = useState(0);
   const [thisWeekLockedMinutes, setThisWeekLockedMinutes] = useState(0);
   const [lockedEvents, setLockedEvents] = useState<LockedEvent[]>([]);
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowMs(Date.now());
+    }, 30000);
 
+    return () => clearInterval(interval);
+  }, []);
+  useEffect(() => {
+    const total = getAllTimeLockedMinutes(lockedEvents, nowMs);
+    const week = getThisWeekLockedMinutes(lockedEvents, nowMs);
+
+    setAllTimeLockedMinutes(total);
+    setThisWeekLockedMinutes(week);
+  }, [lockedEvents, nowMs]);
+
+  
   const [stats, setStats] = useState<{
     totalWins: number;
     averageBedtime: string;
@@ -249,6 +265,20 @@ export default function HomeScreen() {
 
   const [uid, setUid] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    if (!uid) return;
+    if (profileLoading) return;
+
+    const userDocRef = doc(firestore, 'profiledb', uid);
+
+    updateDoc(userDocRef, {
+      totalLockedMinutes: allTimeLockedMinutes,
+      thisWeekLockedMinutes: thisWeekLockedMinutes,
+    }).catch((err) => {
+      console.error('Failed to update minute totals:', err);
+    });
+  }, [uid, profileLoading, allTimeLockedMinutes, thisWeekLockedMinutes]);
 
   const canScrollLeft = scrollPosition > 5;
   const canScrollRight =
@@ -707,21 +737,21 @@ export default function HomeScreen() {
           const events = (profileData?.lockedEvents ?? []) as LockedEvent[];
           setLockedEvents(events);
 
-          const total = getAllTimeLockedMinutes(events);
-          const week = getThisWeekLockedMinutes(events);
+          // const total = getAllTimeLockedMinutes(events);
+          // const week = getThisWeekLockedMinutes(events);
 
-          setAllTimeLockedMinutes(total);
-          setThisWeekLockedMinutes(week);
+          // setAllTimeLockedMinutes(total);
+          // setThisWeekLockedMinutes(week);
 
-          if (
-            profileData.totalLockedMinutes !== total ||
-            profileData.thisWeekLockedMinutes !== week
-          ) {
-            updateDoc(userDocRef, {
-              totalLockedMinutes: total,
-              thisWeekLockedMinutes: week,
-            }).catch(() => {});
-          }
+          // if (
+          //   profileData.totalLockedMinutes !== total ||
+          //   profileData.thisWeekLockedMinutes !== week
+          // ) {
+          //   updateDoc(userDocRef, {
+          //     totalLockedMinutes: total,
+          //     thisWeekLockedMinutes: week,
+          //   }).catch(() => {});
+          // }
 
           setStats(calculateStats(profileData));
         } else {

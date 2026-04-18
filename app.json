@@ -11,7 +11,6 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.dmao.beddr",
-      "googleServicesFile": "./GoogleService-Info.plist",
       "useFrameworks": "dynamic"
     },
     "android": {
@@ -56,6 +55,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2540cfb7-2b56-43bb-9d3f-2e023250b920"
+      }
+    },
+    "owner": "piedav"
   }
 }

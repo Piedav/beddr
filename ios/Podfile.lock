@@ -11,10 +11,14 @@ PODS:
     - PromisesObjC (~> 2.4)
   - EASClient (1.0.8):
     - ExpoModulesCore
+  - EXApplication (7.0.8):
+    - ExpoModulesCore
   - EXConstants (18.0.13):
     - ExpoModulesCore
   - EXJSONUtils (0.15.0)
   - EXManifests (1.0.10):
+    - ExpoModulesCore
+  - EXNotifications (0.32.16):
     - ExpoModulesCore
   - Expo (54.0.33):
     - ExpoModulesCore
@@ -2303,9 +2307,11 @@ PODS:
 
 DEPENDENCIES:
   - EASClient (from `../node_modules/expo-eas-client/ios`)
+  - EXApplication (from `../node_modules/expo-application/ios`)
   - EXConstants (from `../node_modules/expo-constants/ios`)
   - EXJSONUtils (from `../node_modules/expo-json-utils/ios`)
   - EXManifests (from `../node_modules/expo-manifests/ios`)
+  - EXNotifications (from `../node_modules/expo-notifications/ios`)
   - Expo (from `../node_modules/expo`)
   - "ExpoAdapterGoogleSignIn (from `../node_modules/@react-native-google-signin/google-signin/expo/ios`)"
   - ExpoAsset (from `../node_modules/expo-asset/ios`)
@@ -2430,12 +2436,16 @@ SPEC REPOS:
 EXTERNAL SOURCES:
   EASClient:
     :path: "../node_modules/expo-eas-client/ios"
+  EXApplication:
+    :path: "../node_modules/expo-application/ios"
   EXConstants:
     :path: "../node_modules/expo-constants/ios"
   EXJSONUtils:
     :path: "../node_modules/expo-json-utils/ios"
   EXManifests:
     :path: "../node_modules/expo-manifests/ios"
+  EXNotifications:
+    :path: "../node_modules/expo-notifications/ios"
   Expo:
     :path: "../node_modules/expo"
   ExpoAdapterGoogleSignIn:
@@ -2644,9 +2654,11 @@ SPEC CHECKSUMS:
   AppAuth: d4f13a8fe0baf391b2108511793e4b479691fb73
   AppCheckCore: cc8fd0a3a230ddd401f326489c99990b013f0c4f
   EASClient: 40dd9e740684782610c49becab2643782ea1a20c
+  EXApplication: 1e98d4b1dccdf30627f92917f4b2c5a53c330e5f
   EXConstants: fce59a631a06c4151602843667f7cfe35f81e271
   EXJSONUtils: 1d3e4590438c3ee593684186007028a14b3686cd
   EXManifests: a8d97683e5c7a3b026ffbd58559c64dc655b747b
+  EXNotifications: 9eec98712cc814ceff916d876cb53859003b0597
   Expo: aadbcc8c6c14ff3105a9154f1683cb1424ff0d2a
   ExpoAdapterGoogleSignIn: cde973fe0134b1c0204502eeae5ec701cc379a57
   ExpoAsset: f867e55ceb428aab99e1e8c082b5aee7c159ea18

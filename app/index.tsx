@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import * as Notifications from 'expo-notifications';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   arrayUnion,
@@ -39,6 +40,14 @@ const strongColor = '#cc7bdbff';
 const warmFontType = 'Molengo';
 const defFontType = 'OpenSansSemiBold';
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
 interface UserProfile {
   name: string;
   lockedEvents: [];
@@ -226,6 +235,76 @@ export default function HomeScreen() {
   const [thisWeekLockedMinutes, setThisWeekLockedMinutes] = useState(0);
   const [lockedEvents, setLockedEvents] = useState<LockedEvent[]>([]);
   const [nowMs, setNowMs] = useState(Date.now());
+  const homeLockoutNotificationIdRef = useRef<string | null>(null);
+  const lastLockoutNotificationAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    requestNotificationPermission().catch(console.error);
+  }, []);
+  const requestNotificationPermission = async () => {
+    const settings = await Notifications.getPermissionsAsync();
+
+    if (settings.granted || settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+      return true;
+    }
+
+    const req = await Notifications.requestPermissionsAsync({
+      ios: {
+        allowAlert: true,
+        allowBadge: false,
+        allowSound: false,
+      },
+    });
+
+    return !!(req.granted || req.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL);
+  };
+
+  const scheduleHomeLockoutNotification = async () => {
+    const now = Date.now();
+
+    // debounce so repeated app-state churn doesn't spam notifications
+    if (now - lastLockoutNotificationAtRef.current < 8000) return;
+
+    lastLockoutNotificationAtRef.current = now;
+
+    const hasPermission = await requestNotificationPermission();
+    if (!hasPermission) return;
+
+    // cancel previous pending one if any
+    if (homeLockoutNotificationIdRef.current) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(
+          homeLockoutNotificationIdRef.current
+        );
+      } catch {}
+      homeLockoutNotificationIdRef.current = null;
+    }
+
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Locked out',
+        body: 'You left Beddr, so your lock-in session ended.',
+        sound: false,
+      },
+      trigger: null, // immediate local notification
+    });
+
+    homeLockoutNotificationIdRef.current = id;
+  };
+
+  const cancelHomeLockoutNotification = async () => {
+    if (!homeLockoutNotificationIdRef.current) return;
+
+    try {
+      await Notifications.cancelScheduledNotificationAsync(
+        homeLockoutNotificationIdRef.current
+      );
+    } catch {}
+
+    homeLockoutNotificationIdRef.current = null;
+  };
+
+
   useEffect(() => {
     const interval = setInterval(() => {
       setNowMs(Date.now());
@@ -598,7 +677,9 @@ export default function HomeScreen() {
             const leaveTs = Date.now();
             pendingFalseEventRef.current = true;
             pendingFalseTimestampRef.current = leaveTs;
+
             await markPendingLockOut(leaveTs);
+            await scheduleHomeLockoutNotification();
           }
         }
       }
@@ -608,6 +689,7 @@ export default function HomeScreen() {
         (prevState === 'background' || prevState === 'inactive') &&
         nextAppState === 'active'
       ) {
+        await cancelHomeLockoutNotification();
         await flushPendingFalseEvent();
       }
 

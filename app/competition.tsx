@@ -53,7 +53,7 @@ export default function CompetitionScreen() {
   const { userData } = useUser();
   const route = useRoute<any>();
   const competitionId: string | undefined = route.params?.competitionId;
-
+  const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
   const [competition, setCompetition] = useState<CompetitionDoc | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasInitialized, setHasInitialized] = useState(false);
@@ -221,7 +221,7 @@ export default function CompetitionScreen() {
   ): LeaderboardEntry[] => {
     const entries = Object.entries(players ?? {}).map(([uid, pdata]) => ({
       uid,
-      name: uid === myUid ? 'You' : playerNames[uid] ?? pdata.name ?? 'Player',
+      name: uid === myUid ? 'You' : playerNames?.[uid] ?? pdata?.name ?? 'Player',
       points: pdata?.points ?? 0,
       isUser: uid === myUid,
     }));
@@ -275,14 +275,20 @@ export default function CompetitionScreen() {
         competition?.winVal,
         userData?.uid
       ),
-    [competition?.players, competition?.winType, competition?.winVal, userData?.uid]
+    [
+      competition?.players,
+      competition?.winType,
+      competition?.winVal,
+      userData?.uid,
+      playerNames,
+    ]
   );
 
   const myEntry = rankedLeaderboard.find((e) => e.isUser);
   const myStoredPoints = competition?.players?.[userData?.uid ?? '']?.points ?? 0;
   const totalPlayers = Object.keys(competition?.players ?? {}).length;
   const totalTeamPoints = rankedLeaderboard.reduce((sum, e) => sum + e.points, 0);
-  const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
+  
 
   const winnerSummary = (() => {
     if (competition?.winType === 'number') {

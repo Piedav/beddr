@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import * as LiveActivity from 'expo-live-activity';
 import * as Notifications from 'expo-notifications';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
@@ -20,6 +21,7 @@ import {
   AppStateStatus,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -237,6 +239,76 @@ export default function HomeScreen() {
   const [nowMs, setNowMs] = useState(Date.now());
   const homeLockoutNotificationIdRef = useRef<string | null>(null);
   const lastLockoutNotificationAtRef = useRef<number>(0);
+  const liveActivityIdRef = useRef<string | null>(null);
+  const liveActivityStartMsRef = useRef<number | null>(null);
+  type LiveActivityState = Parameters<typeof LiveActivity.startActivity>[0];
+  const isLiveActivitySupported =
+    Platform.OS === 'ios';
+
+  const startLockInLiveActivity = async (startMs: number) => {
+    if (Platform.OS !== 'ios') return;
+
+    try {
+      if (liveActivityIdRef.current) {
+        await LiveActivity.stopActivity(liveActivityIdRef.current, {
+          title: 'Locked out',
+          subtitle: 'Session ended',
+        });
+        liveActivityIdRef.current = null;
+      }
+
+      const id = LiveActivity.startActivity(
+        {
+          title: 'Beddr - Locked in',
+          subtitle: '0m',
+          imageName: 'lock.fill',
+        });
+
+      if (id) {
+        liveActivityIdRef.current = id;
+        liveActivityStartMsRef.current = startMs;
+      }
+    } catch (e) {
+      console.error('Failed to start Live Activity', e);
+    }
+  };
+
+  const updateLockInLiveActivity = async () => {
+    if (Platform.OS !== 'ios') return;
+    if (!liveActivityIdRef.current) return;
+    if (!liveActivityStartMsRef.current) return;
+    if (!theButtonPressedRef.current) return;
+
+    try {
+      const elapsedMinutes = Math.floor(
+        (Date.now() - liveActivityStartMsRef.current) / 60000
+      );
+
+      await LiveActivity.updateActivity(liveActivityIdRef.current, {
+        title: 'Locked in',
+        subtitle: formatMinutes(elapsedMinutes),
+      });
+    } catch (e) {
+      console.error('Failed to update Live Activity', e);
+    }
+  };
+
+  const stopLockInLiveActivity = async () => {
+    if (Platform.OS !== 'ios') return;
+    if (!liveActivityIdRef.current) return;
+
+    try {
+      await LiveActivity.stopActivity(liveActivityIdRef.current, {
+          title: 'Locked out',
+          subtitle: 'Session ended',
+        });
+    } catch (e) {
+      console.error('Failed to stop Live Activity', e);
+    } finally {
+      liveActivityIdRef.current = null;
+      liveActivityStartMsRef.current = null;
+    }
+  };
 
   useEffect(() => {
     requestNotificationPermission().catch(console.error);
@@ -561,6 +633,18 @@ export default function HomeScreen() {
     flushPendingFalseEvent().catch(console.error);
   }, [uid]);
 
+  useEffect(() => {
+    if (!theButtonPressed) return;
+
+    updateLockInLiveActivity().catch(console.error);
+
+    const interval = setInterval(() => {
+      updateLockInLiveActivity().catch(console.error);
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [theButtonPressed]);
+
   const lastInactiveAtRef = useRef<number | null>(null);
   const pendingFalseEventRef = useRef(false);
   const isWritingFalseEventRef = useRef(false);
@@ -672,6 +756,7 @@ export default function HomeScreen() {
             // immediately update UI locally
             theButtonPressedRef.current = false;
             setTheButtonPressed(false);
+            await stopLockInLiveActivity();
 
             // defer the Firestore write until app is active again
             const leaveTs = Date.now();
@@ -1261,11 +1346,19 @@ export default function HomeScreen() {
         {/* This is the button that toggles giving points and whanot*/}
                   <TouchableOpacity
                     style={styles.theButton}
-                    onPress={() => {
+                    onPress={async () => {
                       const next = !theButtonPressedRef.current;
+                      const now = Date.now();
+
                       theButtonPressedRef.current = next;
                       setTheButtonPressed(next);
-                      recordEvent(next);
+                      await recordEvent(next, now);
+
+                      if (next) {
+                        await startLockInLiveActivity(now);
+                      } else {
+                        await stopLockInLiveActivity();
+                      }
                     }}
                   >
                     <Ionicons

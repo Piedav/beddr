@@ -241,11 +241,24 @@ export default function HomeScreen() {
   const lastLockoutNotificationAtRef = useRef<number>(0);
   const liveActivityIdRef = useRef<string | null>(null);
   const liveActivityStartMsRef = useRef<number | null>(null);
-  type LiveActivityState = Parameters<typeof LiveActivity.startActivity>[0];
+  type NativeLiveActivityState = {
+    title: string;
+    subtitle?: string;
+    progressBar?: {
+      date?: number;
+      progress?: number;
+      elapsedTimer?: {
+        startDate: number;
+      };
+    };
+    imageName?: string;
+    dynamicIslandImageName?: string;
+  };
   const isLiveActivitySupported =
     Platform.OS === 'ios';
 
   const startLockInLiveActivity = async (startMs: number) => {
+    
     if (Platform.OS !== 'ios') return;
 
     try {
@@ -253,16 +266,23 @@ export default function HomeScreen() {
         await LiveActivity.stopActivity(liveActivityIdRef.current, {
           title: 'Locked out',
           subtitle: 'Session ended',
-        });
+        } as any);
         liveActivityIdRef.current = null;
       }
 
-      const id = LiveActivity.startActivity(
-        {
-          title: 'Beddr - Locked in',
-          subtitle: '0m',
-          imageName: 'lock.fill',
-        });
+      const liveState: NativeLiveActivityState = {
+        title: 'Locked In',
+        subtitle: 'Tap to Open Beddr',
+        progressBar: {
+          elapsedTimer: {
+            startDate: startMs,
+          },
+        },
+      };
+      console.log('Starting stopwatch live activity', liveState);
+      const id = LiveActivity.startActivity(liveState as any, {
+        timerType: 'digital',
+      } as any);
 
       if (id) {
         liveActivityIdRef.current = id;
@@ -271,27 +291,9 @@ export default function HomeScreen() {
     } catch (e) {
       console.error('Failed to start Live Activity', e);
     }
+    
   };
 
-  const updateLockInLiveActivity = async () => {
-    if (Platform.OS !== 'ios') return;
-    if (!liveActivityIdRef.current) return;
-    if (!liveActivityStartMsRef.current) return;
-    if (!theButtonPressedRef.current) return;
-
-    try {
-      const elapsedMinutes = Math.floor(
-        (Date.now() - liveActivityStartMsRef.current) / 60000
-      );
-
-      await LiveActivity.updateActivity(liveActivityIdRef.current, {
-        title: 'Locked in',
-        subtitle: formatMinutes(elapsedMinutes),
-      });
-    } catch (e) {
-      console.error('Failed to update Live Activity', e);
-    }
-  };
 
   const stopLockInLiveActivity = async () => {
     if (Platform.OS !== 'ios') return;
@@ -299,9 +301,9 @@ export default function HomeScreen() {
 
     try {
       await LiveActivity.stopActivity(liveActivityIdRef.current, {
-          title: 'Locked out',
-          subtitle: 'Session ended',
-        });
+        title: 'Locked out',
+        subtitle: 'Session ended',
+      } as any);
     } catch (e) {
       console.error('Failed to stop Live Activity', e);
     } finally {
@@ -633,17 +635,7 @@ export default function HomeScreen() {
     flushPendingFalseEvent().catch(console.error);
   }, [uid]);
 
-  useEffect(() => {
-    if (!theButtonPressed) return;
-
-    updateLockInLiveActivity().catch(console.error);
-
-    const interval = setInterval(() => {
-      updateLockInLiveActivity().catch(console.error);
-    }, 60000);
-
-    return () => clearInterval(interval);
-  }, [theButtonPressed]);
+  
 
   const lastInactiveAtRef = useRef<number | null>(null);
   const pendingFalseEventRef = useRef(false);
@@ -747,11 +739,12 @@ export default function HomeScreen() {
         const elapsed = inactiveAt ? Date.now() - inactiveAt : null;
 
         if (elapsed !== null) {
-          if (elapsed < 100) {
+          if (elapsed < 200) {
             console.log('Probably lock screen');
             console.log(elapsed);
           } else {
             console.log('Probably home screen / app switch');
+            console.log(elapsed);
 
             // immediately update UI locally
             theButtonPressedRef.current = false;

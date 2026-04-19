@@ -206,11 +206,17 @@ import WidgetKit
                 .font(.title3)
                 .modifier(ConditionalForegroundViewModifier(color: attributes.subtitleColor))
             }
-
+            
             if effectiveStretch {
-              if let date = contentState.timerEndDateInMilliseconds {
-                ProgressView(timerInterval: Date.toTimerInterval(miliseconds: date))
-                  .tint(progressViewTint)
+              if let startMs = contentState.elapsedTimerStartDateInMilliseconds {
+                Text("startMs: \(Int(startMs))")
+                    .foregroundStyle(.green)
+                
+                let startDate = Date(timeIntervalSince1970: startMs / 1000.0)
+
+                Text(timerInterval: startDate...Date.distantFuture, countsDown: false)
+                  .font(.system(size: 28, weight: .bold, design: .rounded))
+                  .monospacedDigit()
                   .modifier(ConditionalForegroundViewModifier(color: attributes.progressViewLabelColor))
               } else if let progress = contentState.progress {
                 ProgressView(value: progress)
@@ -229,9 +235,14 @@ import WidgetKit
         }
 
         if !effectiveStretch {
-          if let date = contentState.timerEndDateInMilliseconds {
-            ProgressView(timerInterval: Date.toTimerInterval(miliseconds: date))
-              .tint(progressViewTint)
+          if let startMs = contentState.elapsedTimerStartDateInMilliseconds {
+            Text("elapsed: \(Int(startMs))")
+                .foregroundStyle(.green)
+            let startDate = Date(timeIntervalSince1970: startMs / 1000.0)
+
+            Text(timerInterval: startDate...Date.distantFuture, countsDown: false)
+              .font(.system(size: 28, weight: .bold, design: .rounded))
+              .monospacedDigit()
               .modifier(ConditionalForegroundViewModifier(color: attributes.progressViewLabelColor))
           } else if let progress = contentState.progress {
             ProgressView(value: progress)

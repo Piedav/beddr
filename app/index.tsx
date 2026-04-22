@@ -272,7 +272,7 @@ export default function HomeScreen() {
 
       const liveState: NativeLiveActivityState = {
         title: 'Locked In',
-        subtitle: 'Tap to Open Beddr',
+        subtitle: 'Tap to Open Beddr. Failure to tap this banner while re-opening the device may result in errors in tracking.',
         progressBar: {
           elapsedTimer: {
             startDate: startMs,
@@ -729,37 +729,40 @@ export default function HomeScreen() {
       console.log('AppState:', prevState, '->', nextAppState);
 
       // mark when app first becomes inactive
-      if (nextAppState === 'inactive') {
-        lastInactiveAtRef.current = Date.now();
-      }
+      // if (nextAppState === 'inactive') {
+      //   lastInactiveAtRef.current = Date.now();
+      // }
 
       // decide whether this was likely app switch / home gesture
-      if (prevState === 'inactive' && nextAppState === 'background') {
-        const inactiveAt = lastInactiveAtRef.current;
-        const elapsed = inactiveAt ? Date.now() - inactiveAt : null;
+      // if (prevState === 'inactive' && nextAppState === 'background') {
+      //   const inactiveAt = lastInactiveAtRef.current;
+      //   const elapsed = inactiveAt ? Date.now() - inactiveAt : null;
 
-        if (elapsed !== null) {
-          if (elapsed < 200) {
-            console.log('Probably lock screen');
-            console.log(elapsed);
-          } else {
-            console.log('Probably home screen / app switch');
-            console.log(elapsed);
+      //   if (elapsed !== null) {
+      //     if (elapsed < 200) {
+      //       console.log('Probably lock screen');
+      //       console.log(elapsed);
+      //     } else {
+      //       console.log('Probably home screen / app switch');
+      //       console.log(elapsed);
+      //     }
+      //   }
+      // }
 
-            // immediately update UI locally
-            theButtonPressedRef.current = false;
-            setTheButtonPressed(false);
-            await stopLockInLiveActivity();
+      if(prevState === 'active' && (nextAppState === 'inactive' || nextAppState === 'background')) {
+        // immediately update UI locally
+        console.log("app left");
+        theButtonPressedRef.current = false;
+        setTheButtonPressed(false);
+        //await stopLockInLiveActivity();
 
-            // defer the Firestore write until app is active again
-            const leaveTs = Date.now();
-            pendingFalseEventRef.current = true;
-            pendingFalseTimestampRef.current = leaveTs;
+        // defer the Firestore write until app is active again
+        const leaveTs = Date.now();
+        pendingFalseEventRef.current = true;
+        pendingFalseTimestampRef.current = leaveTs;
 
-            await markPendingLockOut(leaveTs);
-            await scheduleHomeLockoutNotification();
-          }
-        }
+        await markPendingLockOut(leaveTs);
+        await scheduleHomeLockoutNotification();
       }
 
       // once app becomes active again, flush the pending false event
@@ -1347,11 +1350,11 @@ export default function HomeScreen() {
                       setTheButtonPressed(next);
                       await recordEvent(next, now);
 
-                      if (next) {
-                        await startLockInLiveActivity(now);
-                      } else {
-                        await stopLockInLiveActivity();
-                      }
+                      // if (next) {
+                      //   await startLockInLiveActivity(now);
+                      // } else {
+                      //   await stopLockInLiveActivity();
+                      // }
                     }}
                   >
                     <Ionicons

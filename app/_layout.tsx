@@ -52,6 +52,9 @@ function TabsLayout() { //the tabs at the bottom :))
     <Tabs
       screenOptions={{
         headerShown: false,
+        sceneStyle: {
+          backgroundColor: 'bgColor',
+        },
         tabBarStyle: {
           backgroundColor: dbgColor,
           borderTopWidth: 2,

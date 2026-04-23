@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useKeepAwake } from 'expo-keep-awake';
 import * as LiveActivity from 'expo-live-activity';
 import * as Notifications from 'expo-notifications';
+import { Tabs } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   arrayUnion,
@@ -38,6 +40,7 @@ const lbgColor = '#322f4e81';
 const l2bgColor = '#322f4eff';
 const l3bgColor = '#323150';
 const strongColor = '#cc7bdbff';
+const buttonPressedColor = 'rgb(100, 65, 106)';
 
 const warmFontType = 'Molengo';
 const defFontType = 'OpenSansSemiBold';
@@ -178,6 +181,24 @@ function getLockedMinutesInRange(
 
   return Math.floor(totalMs / 60000);
 }
+function formatDurationWithSeconds(totalSeconds: number) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+
+  const hh = h > 0 ? `${h}:` : '';
+  const mm = h > 0 ? String(m).padStart(2, '0') : String(m);
+  const ss = String(s).padStart(2, '0');
+
+  return `${hh}${mm}:${ss}`;
+}
+function formatClockTime(date: Date) {
+  return date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 async function syncAllJoinedCompetitionPoints(
   uid: string,
   lockedEvents: LockedEvent[],
@@ -241,6 +262,17 @@ export default function HomeScreen() {
   const lastLockoutNotificationAtRef = useRef<number>(0);
   const liveActivityIdRef = useRef<string | null>(null);
   const liveActivityStartMsRef = useRef<number | null>(null);
+  const defaultTabBarStyle = {
+    backgroundColor: dbgColor,
+    borderTopWidth: 2,
+    borderTopColor: l3bgColor,
+    height: 80,
+    paddingBottom: 20,
+    paddingTop: 8,
+  };
+  
+  
+
   type NativeLiveActivityState = {
     title: string;
     subtitle?: string;
@@ -379,13 +411,7 @@ export default function HomeScreen() {
   };
 
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setNowMs(Date.now());
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, []);
+  
   useEffect(() => {
     const total = getAllTimeLockedMinutes(lockedEvents, nowMs);
     const week = getThisWeekLockedMinutes(lockedEvents, nowMs);
@@ -410,6 +436,22 @@ export default function HomeScreen() {
   const [collapseFinished, setCollapseFinished] = useState(true);
   const [theButtonPressed, setTheButtonPressed] = useState(false);
   
+  const KeepAwakeOn = () => {
+    useKeepAwake();
+    return null;
+  }
+  useEffect(() => {
+    if (!theButtonPressed) return;
+
+    const interval = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [theButtonPressed]);
+
+  const [statsHeight, setStatsHeight] = useState(0);
+
   const navigation = useNavigation<any>();
 
   const [profileLoading, setProfileLoading] = useState(true);
@@ -754,6 +796,7 @@ export default function HomeScreen() {
         console.log("app left");
         theButtonPressedRef.current = false;
         setTheButtonPressed(false);
+        
         //await stopLockInLiveActivity();
 
         // defer the Firestore write until app is active again
@@ -882,7 +925,7 @@ export default function HomeScreen() {
   //     return typeof v === 'number' ? v : -1;
   //   });
   // };
-
+  
   useEffect(() => {
     if (!uid) return;
 
@@ -1150,7 +1193,7 @@ export default function HomeScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <Ionicons name="moon" size={48} color={strongColor} />
+          <Ionicons name="wifi" size={48} color={strongColor} />
           <Text style={styles.loadingText}>
             {profileLoading ? 'Loading your profile...' : 'Loading competitions...'}
           </Text>
@@ -1201,147 +1244,114 @@ export default function HomeScreen() {
     (c) => c.status !== 'finished' && c.userJoined === true
   );
 
+  const currentLockStartMs =
+    theButtonPressed && lockedEvents.length > 0
+      ? [...lockedEvents]
+          .reverse()
+          .find((e) => e.lockedIn)?.timestamp ?? null
+      : null;
+
+  const lockedInSeconds = currentLockStartMs
+    ? Math.max(0, Math.floor((nowMs - currentLockStartMs) / 1000))
+    : 0;
+  
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={{ ...styles.container, backgroundColor: bgColor,}}>
+      {theButtonPressed && <KeepAwakeOn />}
+      <Tabs.Screen
+        options={{
+          tabBarStyle: theButtonPressed
+            ? {
+                ...defaultTabBarStyle,
+                position: 'absolute',
+                transform: [{ translateY: 120 }],
+                opacity: 0,
+              }
+            : {
+                ...defaultTabBarStyle,
+                position: 'absolute',
+                transform: [{ translateY: 0 }],
+                opacity: 1,
+              },
+        }}
+      />
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={true}>
         <View style={styles.content}>
           {hasInitialized && (
             <>
-              <Animated.View style={getAnimatedStyle(welcomeAnimation)}>
-                <Text style={[styles.warmFont, styles.welcomeText]}>
-                  Welcome, <Text style={styles.username}>{userProfile?.name ?? userData?.name ?? 'User'}</Text>
-                </Text>
-              </Animated.View>
-
               <View style={styles.competitionsContainer}>
-                
-                {competitions.some((comp) => comp.userJoined && comp.status === 'ongoing') && (
-                  <Animated.View
-                    style={[getAnimatedStyle(statusBannerAnimation), styles.statusBanner]}
-                  >
-                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                    <Text style={styles.statusText}>You're competing this week!</Text>
-                  </Animated.View>
-                )}
 
-                <Animated.View style={getAnimatedStyle(progressAnimation)}>
-                  {/* <View style={styles.weeklyProgressContainer}>
-                    <Text style={styles.sectionTitle}>This Week's Progress</Text>
-                    <View style={styles.weeklyProgressWrapper}>
-                      {canScrollLeft && (
-                        <TouchableOpacity
-                          style={[styles.scrollArrowButton, styles.leftArrow]}
-                          onPress={scrollLeft}
-                        >
-                          <Ionicons name="chevron-back" size={20} color={strongColor} />
-                        </TouchableOpacity>
-                      )}
 
-                      <ScrollView
-                        ref={scrollViewRef}
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        style={styles.weeklyScrollView}
-                        onScroll={handleScroll}
-                        onContentSizeChange={handleContentSizeChange}
-                        onLayout={handleLayout}
-                        scrollEventThrottle={16}
+                <View
+                  onLayout={(e) => {
+                  const { height } = e.nativeEvent.layout;
+                  if(!theButtonPressed) setStatsHeight(height);
+                }}>
+                  {!theButtonPressed ? (
+                  <>
+                    <Animated.View style={getAnimatedStyle(welcomeAnimation)}>
+                      <Text style={[styles.warmFont, styles.welcomeText]}>
+                        Welcome, <Text style={styles.username}>{userProfile?.name ?? userData?.name ?? 'User'}</Text>
+                      </Text>
+                    </Animated.View>
+                  
+                  
+                    
+                    {competitions.some((comp) => comp.userJoined && comp.status === 'ongoing') && (
+                      <Animated.View
+                        style={[getAnimatedStyle(statusBannerAnimation), styles.statusBanner]}
                       >
-                        <View style={styles.weeklyProgressRow}>
-                          {weeklyProgress.map((dayData, index) => {
-                            const isToday = index === getTodayIndex();
-                            const isCompleted = (dayData?.points ?? 0) > 0;
+                        <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                        <Text style={styles.statusText}>You're currently in a competition!</Text>
+                      </Animated.View>
+                    )}
 
-                            return (
-                              <View
-                                key={`${dayData.day}-${index}-${dayData.points}`}
-                                style={[
-                                  styles.dayCard,
-                                  isToday && styles.todayCard,
-                                  !isCompleted && isToday && styles.incompleteTodayCard,
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.incompleteDayLabel,
-                                    isToday && styles.todayText,
-                                    isCompleted && styles.dayLabel,
-                                  ]}
-                                >
-                                  {dayData.day}
-                                </Text>
+                    <Animated.View style={getAnimatedStyle(progressAnimation)}>
+                      
+                      <View style = {[styles.row, styles.competitionContainer]}>
+                        {/* <Text style={styles.minutesText}>Lifetime locked in minutes: {formatMinutes(allTimeLockedMinutes)}</Text>
+                        <Text style={styles.minutesText}>This week locked in minutes: {formatMinutes(thisWeekLockedMinutes)}</Text>  */}
+                        <View style={styles.competitionStatBox}>
+                          
+                          <Text style={styles.dataNumber}>
+                            {formatMinutes(allTimeLockedMinutes)}
+                          </Text>
+                          <Text style={styles.competitionStatLabel}>life time locked in</Text>
+                        </View>     
+                        <View style={styles.competitionStatBox}>
+                          
+                          <Text style={styles.dataNumber}>
+                            {formatMinutes(thisWeekLockedMinutes)}
+                          </Text>
+                          <Text style={styles.competitionStatLabel}>weekly time locked in</Text>
+                        </View>   
+                      </View>
+                    </Animated.View>
+                    </>
+                  ) : (
+                    <View style={{height: statsHeight, ...styles.lockedInContainer}}>
+                      <View style={styles.lockedInInner}>
+                        <Text style={styles.lockClockText}>
+                          {formatClockTime(new Date(nowMs))}
+                        </Text>
 
-                                <View style={styles.pointsContainer}>
-                                  <Ionicons
-                                    name="star"
-                                    size={16}
-                                    color={isCompleted ? strongColor : '#666'}
-                                  />
-                                  <Text
-                                    style={[
-                                      styles.dayPoints,
-                                      !isCompleted && styles.incompleteDayPoints,
-                                      isToday && isCompleted && styles.todayText,
-                                    ]}
-                                  >
-                                    {dayData.points}
-                                  </Text>
-                                </View>
+                        <Text style={styles.lockedInLabel}>
+                          Locked in for
+                        </Text>
 
-                                <View style={styles.timeContainer}>
-                                  <Ionicons
-                                    name="moon"
-                                    size={16}
-                                    color={isCompleted ? strongColor : '#666'}
-                                  />
-                                  <Text
-                                    style={[
-                                      styles.lastPutDownTime,
-                                      !isCompleted && styles.incompleteTime,
-                                      isToday && isCompleted && styles.todayText,
-                                    ]}
-                                  >
-                                    {dayData.lastPutDown}
-                                  </Text>
-                                </View>
-                              </View>
-                            );
-                          })}
-                        </View>
-                      </ScrollView>
-
-                      {canScrollRight && (
-                        <TouchableOpacity
-                          style={[styles.scrollArrowButton, styles.rightArrow]}
-                          onPress={scrollRight}
-                        >
-                          <Ionicons name="chevron-forward" size={20} color={strongColor} />
-                        </TouchableOpacity>
-                      )}
+                        <Text style={styles.lockedInTimerText}>
+                          {formatDurationWithSeconds(lockedInSeconds)}
+                        </Text>
+                      </View>
                     </View>
-                  </View> */}
-                  <View style = {[styles.row, styles.competitionContainer]}>
-                    {/* <Text style={styles.minutesText}>Lifetime locked in minutes: {formatMinutes(allTimeLockedMinutes)}</Text>
-                    <Text style={styles.minutesText}>This week locked in minutes: {formatMinutes(thisWeekLockedMinutes)}</Text>  */}
-                    <View style={styles.competitionStatBox}>
-                      
-                      <Text style={styles.dataNumber}>
-                        {formatMinutes(allTimeLockedMinutes)}
-                      </Text>
-                      <Text style={styles.competitionStatLabel}>life time locked in</Text>
-                    </View>     
-                    <View style={styles.competitionStatBox}>
-                      
-                      <Text style={styles.dataNumber}>
-                        {formatMinutes(thisWeekLockedMinutes)}
-                      </Text>
-                      <Text style={styles.competitionStatLabel}>weekly time locked in</Text>
-                    </View>   
-                  </View>
-            
+                  )}
+                </View>
+
         {/* This is the button that toggles giving points and whanot*/}
+                <Animated.View style={getAnimatedStyle(progressAnimation)}>
                   <TouchableOpacity
-                    style={styles.theButton}
+                    style={[styles.theButton, theButtonPressed&&{backgroundColor: buttonPressedColor}]}
                     onPress={async () => {
                       const next = !theButtonPressedRef.current;
                       const now = Date.now();
@@ -1372,173 +1382,27 @@ export default function HomeScreen() {
                   
                 </Animated.View>
 
-
-                
-                <Animated.View style={getAnimatedStyle(competitionsAnimation)}>
-                  {competitions.length === 0 ? (
-                    <View style={styles.noCompetitionsContainer}>
-                      <Ionicons name="trophy-outline" size={48} color="#666" />
-                      <Text style={styles.noCompetitionsText}>No competitions available</Text>
-                      <Text style={styles.noCompetitionsSubtext}>
-                        Check back soon for new competitions!
-                      </Text>
-                    </View>
-                  ) : (
-                    <View>
-                      {activeCompetitions.map((competition) => (
-                        <View key={competition.id} style={styles.competitionContainer}>
-                          <View style={styles.competitionHeader}>
-                            <Text style={styles.competitionTitle}>
-                              {competition.name}{' '}
-                              <Text style={styles.compId}>({competition.id})</Text>
-                            </Text>
-
-                            <View
-                              style={[
-                                styles.statusTag,
-                                {
-                                  backgroundColor: `${getStatusColor(competition.status)}20`,
-                                },
-                              ]}
-                            >
-                              <Ionicons
-                                name={getStatusIcon(competition.status) as any}
-                                size={20}
-                                color={getStatusColor(competition.status)}
-                              />
-                              <Text
-                                style={[
-                                  styles.statusTagText,
-                                  { color: getStatusColor(competition.status) },
-                                ]}
-                              >
-                                {competition.status.toUpperCase()}
-                              </Text>
-                            </View>
-                          </View>
-
-                          <Text style={styles.dateRange}>
-                            {formatDateRange(competition.start, competition.end)}
-                          </Text>
-
-                          <View style={styles.competitionStatsContainer}>
-                            <View style={styles.competitionStatBox}>
-                              <View style={styles.competitionIconContainer}>
-                                <Ionicons name="people" size={24} color={strongColor} />
-                              </View>
-                              <Text style={styles.competitionStatNumber}>
-                                {Object.keys(competition.players || {}).length}
-                              </Text>
-                              <Text style={styles.competitionStatLabel}>Users</Text>
-                            </View>
-
-                            <View style={styles.competitionStatBox}>
-                              <View style={styles.competitionIconContainer}>
-                                <Ionicons name="cash" size={24} color={strongColor} />
-                              </View>
-
-                              
-                              <Text style={styles.competitionStatNumber}>
-                                {competition.reward}
-                              </Text>
-                              
-
-                              <Text style={styles.competitionStatLabel}>Prize Pool</Text>
-                            </View>
-                          </View>
-
-                          <TouchableOpacity
-                            style={[
-                              styles.joinButton,
-                              competition.status === 'finished' && styles.joinButtonDisabled,
-                              isJoining === competition.id && styles.joinButtonDisabled,
-                            ]}
-                            onPress={() =>
-                              competition.userJoined
-                                ? goToCompetition(competition.id)
-                                : handleJoinCompetition(competition.id)
-                            }
-                            disabled={isJoining === competition.id}
-                          >
-                            {isJoining === competition.id ? (
-                              <>
-                                <Ionicons
-                                  name="hourglass"
-                                  size={20}
-                                  color="#FFFFFF"
-                                  style={styles.buttonIcon}
-                                />
-                                <Text style={styles.joinButtonText}>Joining...</Text>
-                              </>
-                            ) : competition.userJoined && competition.status !== 'finished' ? (
-                              <>
-                                <Ionicons
-                                  name="arrow-forward"
-                                  size={20}
-                                  color="#FFFFFF"
-                                  style={styles.buttonIcon}
-                                />
-                                <Text style={styles.joinButtonText}>
-                                  Joined - View Competition
-                                </Text>
-                              </>
-                            ) : competition.userJoined ? (
-                              <>
-                                <Ionicons
-                                  name="information-circle-outline"
-                                  size={20}
-                                  color="#FFFFFF"
-                                  style={styles.buttonIcon}
-                                />
-                                <Text style={styles.joinButtonText}>Ended - View Competition</Text>
-                              </>
-                            ) : competition.status === 'finished' ? (
-                              <>
-                                <Ionicons
-                                  name="close-circle"
-                                  size={20}
-                                  color="#FFFFFF"
-                                  style={styles.buttonIcon}
-                                />
-                                <Text style={styles.joinButtonText}>Competition Ended</Text>
-                              </>
-                            ) : (
-                              <>
-                                <Ionicons
-                                  name="add-circle"
-                                  size={20}
-                                  color="#FFFFFF"
-                                  style={styles.buttonIcon}
-                                />
-                                <Text style={styles.joinButtonText}>Join Competition</Text>
-                              </>
-                            )}
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-
-                      <TouchableOpacity
-                        style={styles.collapseButton}
-                        onPress={() => setCollapseFinished((prev) => !prev)}
-                      >
-                        <Ionicons
-                          name={collapseFinished ? 'chevron-down' : 'chevron-up'}
-                          size={20}
-                          color="#FFFFFF"
-                          style={styles.buttonIcon}
-                        />
-                        <Text style={styles.collapseButtonText}>
-                          {collapseFinished
-                            ? 'Show Finished Competitions'
-                            : 'Hide Finished Competitions'}
+                {!theButtonPressed && (
+                <>
+                  <Animated.View style={getAnimatedStyle(competitionsAnimation)}>
+                    {competitions.length === 0 ? (
+                      <View style={styles.noCompetitionsContainer}>
+                        <Ionicons name="trophy-outline" size={48} color="#666" />
+                        <Text style={styles.noCompetitionsText}>No competitions available</Text>
+                        <Text style={styles.noCompetitionsSubtext}>
+                          Check back soon for new competitions!
                         </Text>
-                      </TouchableOpacity>
-                      
-                      {!collapseFinished &&
-                        finishedCompetitions.map((competition) => (
+                      </View>
+                    ) : (
+                      <View>
+                        {activeCompetitions.map((competition) => (
                           <View key={competition.id} style={styles.competitionContainer}>
                             <View style={styles.competitionHeader}>
-                              <Text style={styles.competitionTitle}>{competition.name}</Text>
+                              <Text style={styles.competitionTitle}>
+                                {competition.name}{' '}
+                                <Text style={styles.compId}>({competition.id})</Text>
+                              </Text>
+
                               <View
                                 style={[
                                   styles.statusTag,
@@ -1573,7 +1437,7 @@ export default function HomeScreen() {
                                   <Ionicons name="people" size={24} color={strongColor} />
                                 </View>
                                 <Text style={styles.competitionStatNumber}>
-                                  {competition.players.toLocaleString()}
+                                  {Object.keys(competition.players || {}).length}
                                 </Text>
                                 <Text style={styles.competitionStatLabel}>Users</Text>
                               </View>
@@ -1583,7 +1447,6 @@ export default function HomeScreen() {
                                   <Ionicons name="cash" size={24} color={strongColor} />
                                 </View>
 
-                                
                                 
                                 <Text style={styles.competitionStatNumber}>
                                   {competition.reward}
@@ -1617,8 +1480,7 @@ export default function HomeScreen() {
                                   />
                                   <Text style={styles.joinButtonText}>Joining...</Text>
                                 </>
-                              ) : competition.userJoined &&
-                                competition.status !== 'finished' ? (
+                              ) : competition.userJoined && competition.status !== 'finished' ? (
                                 <>
                                   <Ionicons
                                     name="arrow-forward"
@@ -1638,9 +1500,7 @@ export default function HomeScreen() {
                                     color="#FFFFFF"
                                     style={styles.buttonIcon}
                                   />
-                                  <Text style={styles.joinButtonText}>
-                                    Ended - View Competition
-                                  </Text>
+                                  <Text style={styles.joinButtonText}>Ended - View Competition</Text>
                                 </>
                               ) : competition.status === 'finished' ? (
                                 <>
@@ -1666,9 +1526,161 @@ export default function HomeScreen() {
                             </TouchableOpacity>
                           </View>
                         ))}
-                    </View>
-                  )}
-                </Animated.View>
+
+                        <TouchableOpacity
+                          style={styles.collapseButton}
+                          onPress={() => setCollapseFinished((prev) => !prev)}
+                        >
+                          <Ionicons
+                            name={collapseFinished ? 'chevron-down' : 'chevron-up'}
+                            size={20}
+                            color="#FFFFFF"
+                            style={styles.buttonIcon}
+                          />
+                          <Text style={styles.collapseButtonText}>
+                            {collapseFinished
+                              ? 'Show Finished Competitions'
+                              : 'Hide Finished Competitions'}
+                          </Text>
+                        </TouchableOpacity>
+                        
+                        {!collapseFinished &&
+                          finishedCompetitions.map((competition) => (
+                            <View key={competition.id} style={styles.competitionContainer}>
+                              <View style={styles.competitionHeader}>
+                                <Text style={styles.competitionTitle}>{competition.name}</Text>
+                                <View
+                                  style={[
+                                    styles.statusTag,
+                                    {
+                                      backgroundColor: `${getStatusColor(competition.status)}20`,
+                                    },
+                                  ]}
+                                >
+                                  <Ionicons
+                                    name={getStatusIcon(competition.status) as any}
+                                    size={20}
+                                    color={getStatusColor(competition.status)}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.statusTagText,
+                                      { color: getStatusColor(competition.status) },
+                                    ]}
+                                  >
+                                    {competition.status.toUpperCase()}
+                                  </Text>
+                                </View>
+                              </View>
+
+                              <Text style={styles.dateRange}>
+                                {formatDateRange(competition.start, competition.end)}
+                              </Text>
+
+                              <View style={styles.competitionStatsContainer}>
+                                <View style={styles.competitionStatBox}>
+                                  <View style={styles.competitionIconContainer}>
+                                    <Ionicons name="people" size={24} color={strongColor} />
+                                  </View>
+                                  <Text style={styles.competitionStatNumber}>
+                                    {Object.keys(competition.players || {}).length}
+                                  </Text>
+                                  <Text style={styles.competitionStatLabel}>Users</Text>
+                                </View>
+
+                                <View style={styles.competitionStatBox}>
+                                  <View style={styles.competitionIconContainer}>
+                                    <Ionicons name="cash" size={24} color={strongColor} />
+                                  </View>
+
+                                  
+                                  
+                                  <Text style={styles.competitionStatNumber}>
+                                    {competition.reward}
+                                  </Text>
+                                  
+
+                                  <Text style={styles.competitionStatLabel}>Prize Pool</Text>
+                                </View>
+                              </View>
+
+                              <TouchableOpacity
+                                style={[
+                                  styles.joinButton,
+                                  competition.status === 'finished' && styles.joinButtonDisabled,
+                                  isJoining === competition.id && styles.joinButtonDisabled,
+                                ]}
+                                onPress={() =>
+                                  competition.userJoined
+                                    ? goToCompetition(competition.id)
+                                    : handleJoinCompetition(competition.id)
+                                }
+                                disabled={isJoining === competition.id}
+                              >
+                                {isJoining === competition.id ? (
+                                  <>
+                                    <Ionicons
+                                      name="hourglass"
+                                      size={20}
+                                      color="#FFFFFF"
+                                      style={styles.buttonIcon}
+                                    />
+                                    <Text style={styles.joinButtonText}>Joining...</Text>
+                                  </>
+                                ) : competition.userJoined &&
+                                  competition.status !== 'finished' ? (
+                                  <>
+                                    <Ionicons
+                                      name="arrow-forward"
+                                      size={20}
+                                      color="#FFFFFF"
+                                      style={styles.buttonIcon}
+                                    />
+                                    <Text style={styles.joinButtonText}>
+                                      Joined - View Competition
+                                    </Text>
+                                  </>
+                                ) : competition.userJoined ? (
+                                  <>
+                                    <Ionicons
+                                      name="information-circle-outline"
+                                      size={20}
+                                      color="#FFFFFF"
+                                      style={styles.buttonIcon}
+                                    />
+                                    <Text style={styles.joinButtonText}>
+                                      Ended - View Competition
+                                    </Text>
+                                  </>
+                                ) : competition.status === 'finished' ? (
+                                  <>
+                                    <Ionicons
+                                      name="close-circle"
+                                      size={20}
+                                      color="#FFFFFF"
+                                      style={styles.buttonIcon}
+                                    />
+                                    <Text style={styles.joinButtonText}>Competition Ended</Text>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Ionicons
+                                      name="add-circle"
+                                      size={20}
+                                      color="#FFFFFF"
+                                      style={styles.buttonIcon}
+                                    />
+                                    <Text style={styles.joinButtonText}>Join Competition</Text>
+                                  </>
+                                )}
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                      </View>
+                    )}
+                  </Animated.View>
+                </>
+                )}
               </View>
 
               {/*<Animated.View style={[getAnimatedStyle(statsAnimation), styles.userStatsContainer]}>
@@ -1861,6 +1873,7 @@ const styles = StyleSheet.create({
   content: {
     padding: 20,
     paddingTop: 40,
+    paddingBottom: 100,
   },
   welcomeText: {
     fontSize: 42,
@@ -1892,6 +1905,10 @@ const styles = StyleSheet.create({
   },
   competitionsContainer: {
     marginBottom: 30,
+  },
+  lockedInContainer: {
+    
+    marginBottom: 0,
   },
   competitionsTitle: {
     fontFamily: defFontType,
@@ -2137,4 +2154,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexWrap: 'wrap',
   },
+  lockedInInner: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  lockClockText: {
+    fontFamily: defFontType,
+    fontSize: 52,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+
+  lockedInLabel: {
+    fontFamily: defFontType,
+    fontSize: 18,
+    color: '#B0B0B0',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+
+  lockedInTimerText: {
+    fontFamily: defFontType,
+    fontSize: 36,
+    fontWeight: '700',
+    color: strongColor,
+    textAlign: 'center',
+  },
+  
 });

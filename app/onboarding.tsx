@@ -3,8 +3,16 @@ import {
   GoogleSignin,
   statusCodes,
 } from '@react-native-google-signin/google-signin';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Linking from 'expo-linking';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithCredential, signOut } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  OAuthProvider,
+  onAuthStateChanged,
+  signInWithCredential,
+  signOut,
+  updateProfile
+} from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -38,7 +46,6 @@ interface OnboardingStep {
 interface User {
   name: string;
   email: string;
-  profilePicture?: string;
   uid: string;
 }
 
@@ -97,20 +104,30 @@ export default function OnboardingScreen({
       try {
         if (firebaseUser) {
           const existingUser: User = {
-            name: firebaseUser.displayName || 'User',
+            name: firebaseUser.displayName ?? '',
             email: firebaseUser.email || '',
-            profilePicture: firebaseUser.photoURL || undefined,
             uid: firebaseUser.uid,
           };
 
           const userDocRef = doc(firestore, 'profiledb', existingUser.uid);
           const userDoc = await getDoc(userDocRef);
 
-          if (!userDoc.exists()) {
+          let finalUser = existingUser;
+
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+
+            finalUser = {
+              ...existingUser,
+              name: data.name || existingUser.name || 'User',
+              email: data.email || existingUser.email,
+            };
+          } else {
             await setDoc(
               userDocRef,
               {
-                name: existingUser.name,
+                name: existingUser.name || 'User',
+                email: existingUser.email,
                 competitions: [],
                 lockedEvents: [],
                 totalLockedMinutes: 0,
@@ -118,10 +135,21 @@ export default function OnboardingScreen({
               },
               { merge: true }
             );
+
+            finalUser = {
+              ...existingUser,
+              name: existingUser.name || 'User',
+            };
           }
 
-          setExistingSignedInUser(existingUser);
-          setUser(existingUser);
+          setExistingSignedInUser(finalUser);
+
+          setUser((prev) => {
+            if (prev && prev.name && prev.name !== 'User') {
+              return prev;
+            }
+            return finalUser;
+          });
           setShowSignedInGate(true);
           return;
         }
@@ -146,23 +174,101 @@ export default function OnboardingScreen({
       const userDocRef = doc(firestore, 'profiledb', userData.uid);
       const userDoc = await getDoc(userDocRef);
 
-      if (!userDoc.exists()) {
-        const profileData = {
+      await setDoc(
+        userDocRef,
+        {
           name: userData.name,
-          competitions: [],
-          lockedEvents: [],
-          totalLockedMinutes: 0,
-          thisWeekLockedMinutes: 0,
-        };
-
-        await setDoc(userDocRef, profileData);
-      }
+          email: userData.email,
+          competitions: userDoc.exists() ? userDoc.data().competitions ?? [] : [],
+          lockedEvents: userDoc.exists() ? userDoc.data().lockedEvents ?? [] : [],
+          totalLockedMinutes: userDoc.exists() ? userDoc.data().totalLockedMinutes ?? 0 : 0,
+          thisWeekLockedMinutes: userDoc.exists() ? userDoc.data().thisWeekLockedMinutes ?? 0 : 0,
+        },
+        { merge: true }
+      );
     } catch (error) {
       console.error('Error creating user profile:', error);
       Alert.alert('Error', 'Failed to create your profile. Please try again.');
       throw error;
     } finally {
       setIsCreatingProfile(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    setIsSigningIn(true);
+
+    try {
+      const appleCredential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      if (!appleCredential.identityToken) {
+        throw new Error('No Apple identity token returned');
+      }
+
+      const provider = new OAuthProvider('apple.com');
+      const credential = provider.credential({
+        idToken: appleCredential.identityToken,
+      });
+
+      const authResult = await signInWithCredential(auth, credential);
+
+      const fullName = appleCredential.fullName
+        ? AppleAuthentication.formatFullName(appleCredential.fullName)
+        : null;
+
+      const signedInUser: User = {
+        name: fullName && fullName.trim().length > 0
+          ? fullName
+          : authResult.user.displayName || 'User',
+        email: appleCredential.email || authResult.user.email || '',
+        uid: authResult.user.uid,
+      };
+      console.log('APPLE FULL NAME:', fullName);
+      console.log('SIGNED IN USER:', signedInUser); 
+      if (signedInUser.name !== 'User') {
+        await updateProfile(authResult.user, {
+          displayName: signedInUser.name,
+        });
+      }
+
+      const userDocRef = doc(firestore, 'profiledb', signedInUser.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        await setDoc(
+          userDocRef,
+          {
+            name: signedInUser.name !== 'User' ? signedInUser.name : userDoc.data().name,
+            email: signedInUser.email || userDoc.data().email,
+          },
+          { merge: true }
+        );
+      } else {
+        await setDoc(userDocRef, {
+          name: signedInUser.name,
+          email: signedInUser.email,
+          competitions: [],
+          lockedEvents: [],
+          totalLockedMinutes: 0,
+          thisWeekLockedMinutes: 0,
+        });
+      }
+
+      setUser(signedInUser);
+    } catch (error: any) {
+      if (error.code === 'ERR_REQUEST_CANCELED') {
+        Alert.alert('Cancelled', 'Apple sign-in was cancelled');
+      } else {
+        console.log(error);
+        Alert.alert('Error', 'An error occurred during Apple sign-in');
+      }
+    } finally {
+      setIsSigningIn(false);
     }
   };
 
@@ -180,7 +286,6 @@ export default function OnboardingScreen({
         const signedInUser: User = {
           name: userInfo.data.user.givenName || 'User',
           email: userInfo.data.user.email,
-          profilePicture: userInfo.data.user.photo || undefined,
           uid: authResult.user.uid,
         };
 
@@ -429,10 +534,18 @@ export default function OnboardingScreen({
                   {isSigningIn ? 'Signing In...' : 'Sign in with Google'}
                 </Text>
               </TouchableOpacity>
-
+              {Platform.OS === 'ios' && (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                  cornerRadius={12}
+                  style={styles.appleSignInButton}
+                  onPress={handleAppleSignIn}
+                />
+              )}
               <View style={styles.privacyInfo}>
                 <Text style={styles.privacyText}>
-                  We use Google sign-in to create your profile and save your progress.
+                  We use Google/Apple sign-in to create your profile and save your progress.
                 </Text>
 
                 <Text style={styles.termsText}>
@@ -520,9 +633,9 @@ export default function OnboardingScreen({
             You’re already signed in as {existingSignedInUser.name}.
           </Text>
 
-          <View style={styles.userInfo}>
+          {/* <View style={styles.userInfo}>
             <Text style={styles.userEmail}>{existingSignedInUser.email}</Text>
-          </View>
+          </View> */}
 
           <TouchableOpacity
             style={[styles.navButton, styles.nextButton, { width: '100%', marginHorizontal: 0, marginTop: 12 }]}
@@ -939,5 +1052,10 @@ const styles = StyleSheet.create({
   },
   navButtonTextDisabled: {
     color: '#666',
+  },
+  appleSignInButton: {
+    width: '100%',
+    height: 52,
+    marginBottom: 20,
   },
 });

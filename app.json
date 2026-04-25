@@ -11,7 +11,8 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.dmao.beddr",
-      "useFrameworks": "dynamic"
+      "useFrameworks": "dynamic",
+      "usesAppleSignIn": true
     },
     "android": {
       "googleServicesFile": "./google-services.json",
@@ -30,6 +31,7 @@
     "plugins": [
       "expo-router",
       "expo-live-activity",
+      "expo-apple-authentication",
       [
         "expo-splash-screen",
         {

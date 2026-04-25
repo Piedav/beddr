@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useKeepAwake } from 'expo-keep-awake';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as LiveActivity from 'expo-live-activity';
 import * as Notifications from 'expo-notifications';
 import { Tabs } from 'expo-router';
@@ -253,7 +254,13 @@ export default function HomeScreen() {
   const [scrollViewWidth, setScrollViewWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
-  
+  const [scrollY, setScrollY] = useState(0);
+  const [layoutHeight, setLayoutHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+
+  const showBottomFade =
+    contentHeight > layoutHeight &&
+    scrollY + layoutHeight < contentHeight - 8;
   const [allTimeLockedMinutes, setAllTimeLockedMinutes] = useState(0);
   const [thisWeekLockedMinutes, setThisWeekLockedMinutes] = useState(0);
   const [lockedEvents, setLockedEvents] = useState<LockedEvent[]>([]);
@@ -791,15 +798,23 @@ export default function HomeScreen() {
       //   }
       // }
 
-      if(prevState === 'active' && (nextAppState === 'inactive' || nextAppState === 'background')) {
-        // immediately update UI locally
-        console.log("app left");
+      if (
+        prevState === 'active' &&
+        (nextAppState === 'inactive' || nextAppState === 'background')
+      ) {
+        const wasLockedIn = theButtonPressedRef.current;
+
+        if (!wasLockedIn) {
+          console.log('app left while already locked out; no notification');
+          appStateRef.current = nextAppState;
+          return;
+        }
+
+        console.log('app left while locked in');
+
         theButtonPressedRef.current = false;
         setTheButtonPressed(false);
-        
-        //await stopLockInLiveActivity();
 
-        // defer the Firestore write until app is active again
         const leaveTs = Date.now();
         pendingFalseEventRef.current = true;
         pendingFalseTimestampRef.current = leaveTs;
@@ -1276,7 +1291,14 @@ export default function HomeScreen() {
               },
         }}
       />
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={true}>
+      <ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={true}
+        onLayout={(e) => setLayoutHeight(e.nativeEvent.layout.height)}
+        onContentSizeChange={(_, h) => setContentHeight(h)}
+        onScroll={(e) => setScrollY(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
+      >
         <View style={styles.content}>
           {hasInitialized && (
             <>
@@ -1702,6 +1724,24 @@ export default function HomeScreen() {
           )}
         </View>
       </ScrollView>
+      {showBottomFade && (
+        <LinearGradient
+          colors={[
+            'transparent',
+            'rgba(17,17,36,0.6)',
+            'rgba(17,17,36,0.9)',
+            '#111124'
+          ]}
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 190,
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }

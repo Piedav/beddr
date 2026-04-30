@@ -1,11 +1,22 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { arrayUnion, collection, doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { deleteUser } from 'firebase/auth';
+import {
+  arrayUnion,
+  collection,
+  deleteField,
+  doc,
+  onSnapshot,
+  updateDoc,
+  writeBatch
+} from 'firebase/firestore';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,7 +25,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { firestore } from '../firebase';
+import { auth, firestore } from '../firebase';
 import { useUser } from './_layout';
 
 const dbgColor = "#0a0513ff";
@@ -45,19 +56,7 @@ interface Competition {
   winVal?: number;
   players: Record<string, { points?: number; joinedAt?: any; name?: string }>;
 }
-interface FinishedCompetitionEntry {
-  id: string;
-  name: string;
-  start: number;
-  end: number;
-  points: number;
-  rank: number;
-  totalPlayers: number;
-  reward?: string;
-  winType?: WinType;
-  winVal?: number;
-  isWinner: boolean;
-}
+
 type LeaderboardEntry = {
   uid: string;
   name: string;
@@ -173,13 +172,14 @@ const ResetButton: React.FC<ResetButtonProps> = ({
         onPress={handleReset}
       >
         {showIcon && (
-          <Ionicons name="log-out" size={20} color="#ff0000ff" />
+          <Ionicons name="log-out" size={20} color="rgb(255, 255, 255)" />
         )}
         <Text style={[resetStyles.resetText, textStyle]}>{title}</Text>
       </TouchableOpacity>
     </View>
   );
 };
+
 
 function getCompetitionStatus(start: number, end: number): 'ongoing' | 'upcoming' | 'finished' {
   const now = Date.now();
@@ -205,19 +205,10 @@ function formatDateRange(startMs: number, endMs: number) {
   return `${startFormatted} - ${endFormatted}`;
 }
 
-function getRank(players: Record<string, { points?: number }>, uid: string): number {
-  const sorted = Object.entries(players)
-    .map(([playerUid, data]) => ({
-      uid: playerUid,
-      points: data?.points ?? 0,
-    }))
-    .sort((a, b) => b.points - a.points);
 
-  return sorted.findIndex((p) => p.uid === uid) + 1;
-}
 
 export default function ProfileScreen() {
-  const { userData, setUserData } = useUser();
+  const { userData, setUserData, resetToOnboarding } = useUser();
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
@@ -227,6 +218,7 @@ export default function ProfileScreen() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [isSavingName, setIsSavingName] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   const titleAnimation = useRef(new Animated.Value(0)).current;
   const statsAnimation = useRef(new Animated.Value(0)).current;
@@ -516,6 +508,72 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account?',
+      'This will permanently delete your account, profile, and competition data. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!userData?.uid) return;
+
+            const currentUser = auth.currentUser;
+
+            if (!currentUser) {
+              Alert.alert('Error', 'No signed-in user found.');
+              return;
+            }
+
+            setIsDeletingAccount(true);
+
+            try {
+              const uid = userData.uid;
+              setUserProfile(null);
+              setCompetitions([]);
+              const batch = writeBatch(firestore);
+
+              competitions.forEach((comp) => {
+                if (comp.players?.[uid]) {
+                  batch.update(doc(firestore, 'competitiondb', comp.id), {
+                    [`players.${uid}`]: deleteField(),
+                  });
+                }
+              });
+
+              batch.delete(doc(firestore, 'profiledb', uid));
+
+              await batch.commit();
+
+              await deleteUser(currentUser);
+              await AsyncStorage.multiRemove(['userData', 'hasCompletedOnboarding']);
+
+              setUserData?.(null as any);
+              resetToOnboarding();
+            } catch (error: any) {
+              console.error('Failed to delete account:', error);
+
+              if (error?.code === 'auth/requires-recent-login') {
+                Alert.alert(
+                  'Please log in again',
+                  'For security, log out, log back in, then try deleting your account again.'
+                );
+              } else {
+                Alert.alert('Error', 'Could not delete your account. Please try again.');
+              }
+              if (!auth.currentUser) {
+                resetToOnboarding();
+              }
+            } finally {
+              setIsDeletingAccount(false);
+            }
+          },
+        },
+      ]
+    );
+  };
   if (isLoadingProfile || isLoadingCompetitions || !userData) {
     return (
       <SafeAreaView style={styles.container}>
@@ -632,9 +690,41 @@ export default function ProfileScreen() {
                   <Text style={styles.statLabel}>Total Finished Competition Points</Text>
                 </View>
               </Animated.View>
+              
+              <Animated.View style={[getAnimatedStyle(resetButtonAnimation), styles.linksContainer]}>
+                <Text style={styles.sectionMiniTitle}>Help & Legal</Text>
+
+                <TouchableOpacity
+                  style={styles.linkRow}
+                  onPress={() => Linking.openURL('https://www.davidmao.net/beddr/privacy')}
+                >
+                  <Ionicons name="shield-checkmark-outline" size={20} color={strongColor} />
+                  <Text style={styles.linkRowText}>Privacy Policy</Text>
+                  <Ionicons name="chevron-forward" size={18} color="#A0A0B8" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.linkRow}
+                  onPress={() => Linking.openURL('https://www.davidmao.net/beddr/terms')}
+                >
+                  <Ionicons name="document-text-outline" size={20} color={strongColor} />
+                  <Text style={styles.linkRowText}>Terms of Service</Text>
+                  <Ionicons name="chevron-forward" size={18} color="#A0A0B8" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.linkRow}
+                  onPress={() => Linking.openURL('https://www.davidmao.net/beddr/support')}
+                >
+                  <Ionicons name="help-circle-outline" size={20} color={strongColor} />
+                  <Text style={styles.linkRowText}>Support</Text>
+                  <Ionicons name="chevron-forward" size={18} color="#A0A0B8" />
+                </TouchableOpacity>
+              </Animated.View>
 
               <Animated.View style={[getAnimatedStyle(resetButtonAnimation), styles.resetContainer]}>
-                <ResetButton title="Logout" style={{ marginBottom: 20 }} />
+                <ResetButton title="Logout" style={{ marginBottom: 8 }} />
+                
               </Animated.View>
 
               <Animated.View style={getAnimatedStyle(competitionsAnimation)}>
@@ -704,6 +794,19 @@ export default function ProfileScreen() {
                   )}
                 </View>
               </Animated.View>
+
+              <View style={resetStyles.container}>
+                <TouchableOpacity
+                  style={resetStyles.deleteButton}
+                  onPress={handleDeleteAccount}
+                  disabled={isDeletingAccount}
+                >
+                  <Ionicons name="trash-outline" size={20} color="#FF4444" />
+                  <Text style={[resetStyles.resetText, {color: "#FF4444"}]}>
+                    {isDeletingAccount ? 'Deleting...' : 'Delete Account'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </>
           )}
         </View>
@@ -725,6 +828,18 @@ export default function ProfileScreen() {
 }
 
 const resetStyles = StyleSheet.create({
+  deleteButton: {
+    
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: bgColor,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FF4444',
+    gap: 8,
+  },
   container: {
     alignItems: 'center',
     marginVertical: 10,
@@ -737,11 +852,11 @@ const resetStyles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#FF4444',
+    borderColor: '#ffffff',
     gap: 8,
   },
   resetText: {
-    color: '#FF4444',
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
     fontFamily: defFontType,
@@ -982,5 +1097,27 @@ const styles = StyleSheet.create({
   resetContainer: {
     marginTop: 10,
     marginBottom: 30,
+  },
+  linksContainer: {
+    backgroundColor: lbgColor,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
+  },
+
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+
+  linkRowText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontFamily: defFontType,
+    marginLeft: 12,
   },
 });

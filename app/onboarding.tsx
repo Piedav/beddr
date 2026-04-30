@@ -260,6 +260,9 @@ export default function OnboardingScreen({
       }
 
       setUser(signedInUser);
+      setExistingSignedInUser(signedInUser);
+      setShowSignedInGate(true);
+
     } catch (error: any) {
       if (error.code === 'ERR_REQUEST_CANCELED') {
         Alert.alert('Cancelled', 'Apple sign-in was cancelled');
@@ -290,6 +293,8 @@ export default function OnboardingScreen({
         };
 
         setUser(signedInUser);
+        setExistingSignedInUser(signedInUser);
+        setShowSignedInGate(true);
       }
     } catch (error: any) {
       if (error.code === statusCodes.SIGN_IN_CANCELLED) {
@@ -328,7 +333,7 @@ export default function OnboardingScreen({
       id: 0,
       title: 'Welcome to Beddr',
       subtitle: 'Compete by staying off your phone',
-      icon: 'moon',
+      icon: 'trophy',
       content: (
         <View style={styles.stepContent}>
           <View style={styles.featuresList}>
@@ -373,7 +378,7 @@ export default function OnboardingScreen({
               <View style={styles.stepInfo}>
                 <Text style={styles.stepTitle}>Stay Off Your Phone</Text>
                 <Text style={styles.stepText}>
-                  Your locked time builds while you stay in this app (off of other distracting apps) or have your phone locked.
+                  Your locked time builds while you stay in this app (off of other distracting apps) or have your phone locked. Locked-in time is estimated based on app usage and lock state.
                 </Text>
               </View>
             </View>
@@ -383,9 +388,9 @@ export default function OnboardingScreen({
                 <Text style={styles.stepNumberText}>3</Text>
               </View>
               <View style={styles.stepInfo}>
-                <Text style={styles.stepTitle}>Lock Out Automatically</Text>
+                <Text style={styles.stepTitle}>Lock Out and Earn Points</Text>
                 <Text style={styles.stepText}>
-                  Leaving the app ends the session and records your time.
+                  Leaving the app or stopping the session from the home screen ends your session. You earn 1 point per minute locked-in, which goes towards your competitions.
                 </Text>
               </View>
             </View>
@@ -524,14 +529,14 @@ export default function OnboardingScreen({
               <TouchableOpacity
                 style={[
                   styles.googleSignInButton,
-                  isSigningIn && styles.googleSignInButtonDisabled,
+                  
                 ]}
                 onPress={handleGoogleSignIn}
                 disabled={isSigningIn}
               >
                 <Ionicons name="logo-google" size={20} color="#FFFFFF" />
                 <Text style={styles.googleSignInButtonText}>
-                  {isSigningIn ? 'Signing In...' : 'Sign in with Google'}
+                  Sign in with Google
                 </Text>
               </TouchableOpacity>
               {Platform.OS === 'ios' && (
@@ -552,13 +557,13 @@ export default function OnboardingScreen({
                   By signing in, you agree to our{' '}
                   <Text
                     style={styles.linkText}
-                    onPress={() => Linking.openURL('https://docs.google.com/document/d/18RLEc3hMAVze3sMHwHNVXARgPBD4pvHT3VGBDKF-9ro/edit?usp=sharing')}
+                    onPress={() => Linking.openURL('https://www.davidmao.net/beddr/terms')}
                   >
                     Terms of Service
                   </Text> and{' '}
                   <Text
                     style={styles.linkText}
-                    onPress={() => Linking.openURL('https://docs.google.com/document/d/1JtSSQVSdmyJQpEnILBLqRfdohhEOBnuJIaFCMSf0zTU/edit?usp=sharing')}
+                    onPress={() => Linking.openURL('https://www.davidmao.net/beddr/privacy')}
                   >
                     Privacy Policy
                   </Text>.
@@ -628,28 +633,35 @@ export default function OnboardingScreen({
             <Ionicons name="person-circle-outline" size={40} color={strongColor} />
           </View>
 
-          <Text style={styles.title}>Welcome Back</Text>
+          <Text style={styles.title}>Login</Text>
           <Text style={styles.subtitle}>
-            You’re already signed in as {existingSignedInUser.name}.
+            You’re signed in as {existingSignedInUser.name}.
           </Text>
 
           {/* <View style={styles.userInfo}>
             <Text style={styles.userEmail}>{existingSignedInUser.email}</Text>
           </View> */}
 
-          <TouchableOpacity
-            style={[styles.navButton, styles.nextButton, { width: '100%', marginHorizontal: 0, marginTop: 12 }]}
-            onPress={handleUseExistingAccount}
-          >
-            <Text style={styles.nextButtonText}>Continue</Text>
-          </TouchableOpacity>
+          <View style={styles.gateButtons}>
+            <TouchableOpacity
+              style={[styles.primaryButton]}
+              activeOpacity={0.8}
+              onPress={handleUseExistingAccount}
+            >
+              
+              <Text style={styles.primaryButtonText}>Continue</Text>
+              <Ionicons name="arrow-forward" size={18} color="#fff" />
+              
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.navButton, styles.backButton, { width: '100%', marginHorizontal: 0, marginTop: 12 }]}
-            onPress={handleSignOutFromOnboarding}
-          >
-            <Text style={styles.backButtonText}>Sign Out</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.secondaryButton]}
+              onPress={handleSignOutFromOnboarding}
+            >
+              <Text style={styles.secondaryButtonText}>Sign Out</Text>
+              <Ionicons name="arrow-back" size={18} color="#B0B0B0" />
+            </TouchableOpacity>
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -1057,5 +1069,48 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 52,
     marginBottom: 20,
+  },
+  gateButtons: {
+    width: '100%',
+    maxWidth: 320,
+    alignSelf: 'center',
+    marginTop: 20,
+  },
+
+  primaryButton: {
+    backgroundColor: strongColor,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+
+    flexDirection: "row",
+    gap: 8,
+  },
+
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: defFontType,
+  },
+
+  secondaryButton: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+
+    flexDirection: "row",
+    gap: 8,
+  },
+
+  secondaryButtonText: {
+    color: '#B0B0B0',
+    fontSize: 14,
+    fontWeight: '500',
+    fontFamily: defFontType,
   },
 });

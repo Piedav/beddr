@@ -12,7 +12,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.dmao.beddr",
       "useFrameworks": "dynamic",
-      "usesAppleSignIn": true
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "NSUserNotificationsUsageDescription": "Beddr uses notifications to let you know when your lock-in session ends."
+      }
     },
     "android": {
       "googleServicesFile": "./google-services.json",
@@ -30,7 +33,6 @@
     },
     "plugins": [
       "expo-router",
-      "expo-live-activity",
       "expo-apple-authentication",
       [
         "expo-splash-screen",

@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as LiveActivity from 'expo-live-activity';
 import * as Notifications from 'expo-notifications';
 import { Tabs } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -24,12 +23,11 @@ import {
   AppStateStatus,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, firestore } from '../firebase';
@@ -267,8 +265,6 @@ export default function HomeScreen() {
   const [nowMs, setNowMs] = useState(Date.now());
   const homeLockoutNotificationIdRef = useRef<string | null>(null);
   const lastLockoutNotificationAtRef = useRef<number>(0);
-  const liveActivityIdRef = useRef<string | null>(null);
-  const liveActivityStartMsRef = useRef<number | null>(null);
   const defaultTabBarStyle = {
     backgroundColor: dbgColor,
     borderTopWidth: 2,
@@ -280,76 +276,7 @@ export default function HomeScreen() {
   
   
 
-  type NativeLiveActivityState = {
-    title: string;
-    subtitle?: string;
-    progressBar?: {
-      date?: number;
-      progress?: number;
-      elapsedTimer?: {
-        startDate: number;
-      };
-    };
-    imageName?: string;
-    dynamicIslandImageName?: string;
-  };
-  const isLiveActivitySupported =
-    Platform.OS === 'ios';
-
-  const startLockInLiveActivity = async (startMs: number) => {
-    
-    if (Platform.OS !== 'ios') return;
-
-    try {
-      if (liveActivityIdRef.current) {
-        await LiveActivity.stopActivity(liveActivityIdRef.current, {
-          title: 'Locked out',
-          subtitle: 'Session ended',
-        } as any);
-        liveActivityIdRef.current = null;
-      }
-
-      const liveState: NativeLiveActivityState = {
-        title: 'Locked In',
-        subtitle: 'Tap to Open Beddr. Failure to tap this banner while re-opening the device may result in errors in tracking.',
-        progressBar: {
-          elapsedTimer: {
-            startDate: startMs,
-          },
-        },
-      };
-      console.log('Starting stopwatch live activity', liveState);
-      const id = LiveActivity.startActivity(liveState as any, {
-        timerType: 'digital',
-      } as any);
-
-      if (id) {
-        liveActivityIdRef.current = id;
-        liveActivityStartMsRef.current = startMs;
-      }
-    } catch (e) {
-      console.error('Failed to start Live Activity', e);
-    }
-    
-  };
-
-
-  const stopLockInLiveActivity = async () => {
-    if (Platform.OS !== 'ios') return;
-    if (!liveActivityIdRef.current) return;
-
-    try {
-      await LiveActivity.stopActivity(liveActivityIdRef.current, {
-        title: 'Locked out',
-        subtitle: 'Session ended',
-      } as any);
-    } catch (e) {
-      console.error('Failed to stop Live Activity', e);
-    } finally {
-      liveActivityIdRef.current = null;
-      liveActivityStartMsRef.current = null;
-    }
-  };
+  
 
   useEffect(() => {
     requestNotificationPermission().catch(console.error);

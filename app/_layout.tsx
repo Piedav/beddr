@@ -115,7 +115,7 @@ function TabsLayout() { //the tabs at the bottom :))
           // tabBarIcon: ({ color, size }) => (
           //   <Ionicons name="person" size={size} color={color} />
           // ),
-          href: null, // change this david if you wanna get onboarding
+          href: null, // change this if you wanna get onboarding
         }}
       />
     </Tabs>

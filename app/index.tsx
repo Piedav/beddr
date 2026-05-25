@@ -21,8 +21,6 @@ import {
   Animated,
   AppState,
   AppStateStatus,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
   ScrollView,
   StyleSheet,
   Text,
@@ -63,12 +61,6 @@ interface UserProfile {
     won: boolean;
   }>;
   competitions: {};
-}
-
-interface Player {
-  id: number;
-  name: string;
-  points: number;
 }
 
 interface Competition {
@@ -247,7 +239,6 @@ export default function HomeScreen() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [isJoining, setIsJoining] = useState<string | null>(null);
-  const [weeklyProgress, setWeeklyProgress] = useState<DayProgress[]>([]);
   const [scrollPosition, setScrollPosition] = useState(0);
   const [scrollViewWidth, setScrollViewWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
@@ -256,9 +247,7 @@ export default function HomeScreen() {
   const [layoutHeight, setLayoutHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
 
-  const showBottomFade =
-    contentHeight > layoutHeight &&
-    scrollY + layoutHeight < contentHeight - 8;
+  const showBottomFade = contentHeight > layoutHeight && scrollY + layoutHeight < contentHeight - 8;
   const [allTimeLockedMinutes, setAllTimeLockedMinutes] = useState(0);
   const [thisWeekLockedMinutes, setThisWeekLockedMinutes] = useState(0);
   const [lockedEvents, setLockedEvents] = useState<LockedEvent[]>([]);
@@ -275,9 +264,6 @@ export default function HomeScreen() {
   };
   
   
-
-  
-
   useEffect(() => {
     requestNotificationPermission().catch(console.error);
   }, []);
@@ -409,43 +395,13 @@ export default function HomeScreen() {
     });
   }, [uid, profileLoading, allTimeLockedMinutes, thisWeekLockedMinutes]);
 
-  const canScrollLeft = scrollPosition > 5;
-  const canScrollRight =
-    scrollViewWidth > 0 &&
-    contentWidth > 0 &&
-    scrollPosition < contentWidth - scrollViewWidth - 5;
-
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
-    setScrollPosition(contentOffset.x);
-    setScrollViewWidth(layoutMeasurement.width);
-    setContentWidth(contentSize.width);
-  };
-
-  const handleContentSizeChange = (width: number, _height: number) => {
-    setContentWidth(width);
-  };
-
-  const handleLayout = (event: any) => {
-    setScrollViewWidth(event.nativeEvent.layout.width);
-  };
-
-  const scrollLeft = () => {
-    const newPosition = Math.max(0, scrollPosition - 200);
-    scrollViewRef.current?.scrollTo({ x: newPosition, animated: true });
-  };
-
-  const scrollRight = () => {
-    const maxScroll = contentWidth - scrollViewWidth;
-    const newPosition = Math.min(maxScroll, scrollPosition + 200);
-    scrollViewRef.current?.scrollTo({ x: newPosition, animated: true });
-  };
+  
 
   const goToCompetition = (competitionId: string) => {
     navigation.navigate('competition', { competitionId });
   };
 
-  const getTodayIndex = () => new Date().getDay();
+  
   const recordEvent = async (lockedIn: boolean, timestamp?: number): Promise<boolean> => {
     if (!uid) {
       console.log('recordEvent skipped: no uid');
@@ -480,17 +436,7 @@ export default function HomeScreen() {
 
   
 
-  const convertWeektimesToProgressData = (weektimes: number[]) => {
-    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    return weekDays.map((day, index) => {
-      const weekTimeValue = weektimes?.[index] ?? -1;
-      return {
-        day,
-        points : 0, //: calculatePointsFromWeektime(weekTimeValue),
-        lastPutDown : 0, //: formatTimeFromMinutes(weekTimeValue),
-      };
-    });
-  };
+  
 
   const welcomeAnimation = useRef(new Animated.Value(0)).current;
   const statusBannerAnimation = useRef(new Animated.Value(0)).current;
@@ -613,7 +559,7 @@ export default function HomeScreen() {
 
   
 
-  const lastInactiveAtRef = useRef<number | null>(null);
+  
   const pendingFalseEventRef = useRef(false);
   const isWritingFalseEventRef = useRef(false);
   const pendingFalseTimestampRef = useRef<number | null>(null);
@@ -802,8 +748,6 @@ export default function HomeScreen() {
       if (!cur?.start || !cur?.end) return;
       if (!cur?.players || typeof cur.players !== 'object') return;
 
-      const playerUids = Object.keys(cur.players);
-      const playerCount = playerUids.length;
 
       const myUid = uid;
       const myPlayerEntry = myUid ? cur.players?.[myUid] : null;
@@ -845,20 +789,6 @@ export default function HomeScreen() {
     return `${y}-${m}-${day}`;
   };
 
-  const getThisWeeksDates = () => {
-    const today = new Date();
-    const start = new Date(today);
-    start.setHours(0, 0, 0, 0);
-    start.setDate(today.getDate() - today.getDay());
-
-    const dates: string[] = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
-      dates.push(toYYYYMMDD(d));
-    }
-    return dates;
-  };
 
   // const buildWeektimesFromSleepTimes = (sleepTimes?: Record<string, number>) => {
   //   const dates = getThisWeeksDates();

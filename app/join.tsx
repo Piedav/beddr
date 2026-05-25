@@ -493,6 +493,8 @@ export default function CompetitionCodesScreen() {
         contentContainerStyle={[styles.container, { flexGrow: 1 }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         onLayout={(e) => setLayoutHeight(e.nativeEvent.layout.height)}
         onContentSizeChange={(_, h) => setContentHeight(h)}
         onScroll={(e) => setScrollY(e.nativeEvent.contentOffset.y)}

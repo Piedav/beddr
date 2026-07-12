@@ -3,7 +3,6 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
-import { Tabs } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   arrayUnion,
@@ -29,7 +28,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, firestore } from '../firebase';
-import { useUser } from './_layout';
+import { useLockControl, useUser } from './_layout';
 
 const dbgColor = '#0a0513ff';
 const bgColor = '#111124ff';
@@ -236,6 +235,7 @@ function getThisWeekLockedMinutes(
 
 export default function HomeScreen() {
   const { userData } = useUser();
+  const { registerLockToggle, setIsLockedIn } = useLockControl();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [isJoining, setIsJoining] = useState<string | null>(null);
@@ -254,21 +254,6 @@ export default function HomeScreen() {
   const [nowMs, setNowMs] = useState(Date.now());
   const homeLockoutNotificationIdRef = useRef<string | null>(null);
   const lastLockoutNotificationAtRef = useRef<number>(0);
-  const defaultTabBarStyle = {
-    position: 'absolute' as const,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'transparent',
-    borderTopWidth: 0,
-    borderTopColor: 'transparent',
-    elevation: 0,
-    shadowColor: 'transparent',
-    shadowOpacity: 0,
-    height: 80,
-    paddingBottom: 20,
-    paddingTop: 8,
-  };
   
   
   useEffect(() => {
@@ -409,7 +394,7 @@ export default function HomeScreen() {
   };
 
   
-  const recordEvent = async (lockedIn: boolean, timestamp?: number): Promise<boolean> => {
+  const recordEvent = React.useCallback(async (lockedIn: boolean, timestamp?: number): Promise<boolean> => {
     if (!uid) {
       console.log('recordEvent skipped: no uid');
       return false;
@@ -438,7 +423,7 @@ export default function HomeScreen() {
       console.log('recordEvent fallback success:', newEvent);
       return true;
     }
-  };
+  }, [uid]);
   
 
   
@@ -694,6 +679,7 @@ export default function HomeScreen() {
 
         theButtonPressedRef.current = false;
         setTheButtonPressed(false);
+        setIsLockedIn(false);
 
         const leaveTs = Date.now();
         pendingFalseEventRef.current = true;
@@ -1046,6 +1032,31 @@ export default function HomeScreen() {
     ],
   });
 
+  const toggleLockIn = React.useCallback(async () => {
+    const next = !theButtonPressedRef.current;
+    const now = Date.now();
+
+    theButtonPressedRef.current = next;
+    setTheButtonPressed(next);
+    setIsLockedIn(next);
+    await recordEvent(next, now);
+
+    // if (next) {
+    //   await startLockInLiveActivity(now);
+    // } else {
+    //   await stopLockInLiveActivity();
+    // }
+  }, [recordEvent, setIsLockedIn]);
+
+  useEffect(() => {
+    setIsLockedIn(theButtonPressed);
+  }, [setIsLockedIn, theButtonPressed]);
+
+  useEffect(() => {
+    registerLockToggle(toggleLockIn);
+    return () => registerLockToggle(null);
+  }, [registerLockToggle, toggleLockIn]);
+
   if (!authReady) {
     return (
       <SafeAreaView style={styles.container}>
@@ -1133,28 +1144,10 @@ export default function HomeScreen() {
   const lockedInSeconds = currentLockStartMs
     ? Math.max(0, Math.floor((nowMs - currentLockStartMs) / 1000))
     : 0;
-  
 
   return (
     <SafeAreaView style={{ ...styles.container, backgroundColor: bgColor,}}>
       {theButtonPressed && <KeepAwakeOn />}
-      <Tabs.Screen
-        options={{
-          tabBarStyle: theButtonPressed
-            ? {
-                ...defaultTabBarStyle,
-                position: 'absolute',
-                transform: [{ translateY: 120 }],
-                opacity: 0,
-              }
-            : {
-                ...defaultTabBarStyle,
-                position: 'absolute',
-                transform: [{ translateY: 0 }],
-                opacity: 1,
-              },
-        }}
-      />
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={true}
@@ -1238,20 +1231,7 @@ export default function HomeScreen() {
                 <Animated.View style={getAnimatedStyle(progressAnimation)}>
                   <TouchableOpacity
                     style={[styles.theButton, theButtonPressed&&{backgroundColor: buttonPressedColor}]}
-                    onPress={async () => {
-                      const next = !theButtonPressedRef.current;
-                      const now = Date.now();
-
-                      theButtonPressedRef.current = next;
-                      setTheButtonPressed(next);
-                      await recordEvent(next, now);
-
-                      // if (next) {
-                      //   await startLockInLiveActivity(now);
-                      // } else {
-                      //   await stopLockInLiveActivity();
-                      // }
-                    }}
+                    onPress={toggleLockIn}
                   >
                     <Ionicons
                       name={theButtonPressed ? 'lock-closed' : 'lock-open-outline'}

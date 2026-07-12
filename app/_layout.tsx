@@ -1,15 +1,18 @@
 import { Ionicons } from '@expo/vector-icons'; //icons
 import AsyncStorage from '@react-native-async-storage/async-storage'; //storage on the device
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useFonts } from "expo-font";
 import { Tabs } from 'expo-router'; //this is for the tab bar at the bottom :)
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from 'expo-status-bar'; //status of bar style and whatnot
 import React, { createContext, useContext, useEffect, useState } from 'react'; //shares data across the oteher files
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import OnboardingScreen from './onboarding'; //yeah
 
 
 const bgColor = "#111124ff"; //background
 const strongColor = "#cc7bdbff"; //strong color
+const inactiveColor = '#B0B0B0';
 
 interface UserData { //format of data that gets shared through the async thingy
   uid: string;
@@ -31,6 +34,18 @@ const UserContext = createContext<{ //creates a thing for the user
   resetToOnboarding: async () => {},
 });
 
+const LockControlContext = createContext<{
+  isLockedIn: boolean;
+  setIsLockedIn: (locked: boolean) => void;
+  toggleLockIn: () => Promise<void>;
+  registerLockToggle: (handler: (() => Promise<void>) | null) => void;
+}>({
+  isLockedIn: false,
+  setIsLockedIn: () => {},
+  toggleLockIn: async () => {},
+  registerLockToggle: () => {},
+});
+
 // hook to use user context
 export const useUser = () => {
   const context = useContext(UserContext);
@@ -43,11 +58,109 @@ export const useUser = () => {
   return context;
 };
 
+export const useLockControl = () => {
+  const context = useContext(LockControlContext);
+  if (!context) {
+    throw new Error('useLockControl must be used within a LockControlProvider');
+  }
+  return context;
+};
+
+const tabIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
+  index: 'home',
+  competition: 'trophy',
+  join: 'add-circle-outline',
+  profile: 'person',
+};
+
+const tabLabels: Record<string, string> = {
+  index: 'Home',
+  competition: 'Competition',
+  join: 'Join/Create',
+  profile: 'Profile',
+};
+
+function BeddrTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+  const { isLockedIn, toggleLockIn } = useLockControl();
+  const visibleRoutes = state.routes.filter((route) => route.name !== 'onboarding');
+
+  const renderRouteButton = (route: (typeof state.routes)[number]) => {
+    const routeIndex = state.routes.findIndex((item) => item.key === route.key);
+    const focused = state.index === routeIndex;
+    const color = focused ? strongColor : inactiveColor;
+    const options = descriptors[route.key]?.options;
+    const label =
+      typeof options?.title === 'string'
+        ? options.title
+        : tabLabels[route.name] ?? route.name;
+
+    const onPress = () => {
+      const event = navigation.emit({
+        type: 'tabPress',
+        target: route.key,
+        canPreventDefault: true,
+      });
+
+      if (!focused && !event.defaultPrevented) {
+        navigation.navigate(route.name, route.params);
+      }
+    };
+
+    return (
+      <TouchableOpacity
+        key={route.key}
+        accessibilityRole="button"
+        accessibilityState={focused ? { selected: true } : {}}
+        accessibilityLabel={options?.tabBarAccessibilityLabel}
+        activeOpacity={0.72}
+        onPress={onPress}
+        style={styles.tabItem}
+      >
+        <Ionicons
+          name={tabIcons[route.name] ?? 'ellipse-outline'}
+          size={24}
+          color={color}
+        />
+        <Text style={[styles.tabLabel, { color }]}>{label}</Text>
+      </TouchableOpacity>
+    );
+  };
+
+  return (
+    <View pointerEvents="box-none" style={styles.tabBarWrap}>
+      <View style={styles.tabBar}>
+        {visibleRoutes.slice(0, 2).map(renderRouteButton)}
+
+        <TouchableOpacity
+          activeOpacity={0.82}
+          accessibilityRole="button"
+          accessibilityLabel={isLockedIn ? 'Lock out' : 'Lock in'}
+          onPress={toggleLockIn}
+          style={[
+            styles.lockTabButton,
+            isLockedIn && styles.lockTabButtonPressed,
+          ]}
+        >
+          <Ionicons
+            name={isLockedIn ? 'lock-closed' : 'lock-open-outline'}
+            size={30}
+            color="#FFFFFF"
+          />
+        </TouchableOpacity>
+
+        {visibleRoutes.slice(2).map(renderRouteButton)}
+      </View>
+    </View>
+  );
+}
+
 function TabsLayout() { //the tabs at the bottom :))
   return (
     <Tabs
+      tabBar={(props) => <BeddrTabBar {...props} />}
       screenOptions={{
         headerShown: false,
+        lazy: false,
         sceneStyle: {
           backgroundColor: bgColor,
         },
@@ -65,13 +178,6 @@ function TabsLayout() { //the tabs at the bottom :))
           height: 80,
           paddingBottom: 20,
           paddingTop: 8,
-        },
-        tabBarBackground: () => null,
-        tabBarActiveTintColor: strongColor,
-        tabBarInactiveTintColor: '#B0B0B0',
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '600',
         },
       }}
     >
@@ -130,6 +236,8 @@ export default function RootLayout() {
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [userData, setUserData] = useState<UserData | null>(null);
+  const [isLockedIn, setIsLockedIn] = useState(false);
+  const [lockToggleHandler, setLockToggleHandler] = useState<(() => Promise<void>) | null>(null);
 
   const [fontsLoaded] = useFonts({
     Molengo: require("../assets/fonts/Molengo-Regular.ttf"),
@@ -237,6 +345,17 @@ export default function RootLayout() {
       setIsLoading(false);
     }
   };
+
+  const registerLockToggle = React.useCallback((handler: (() => Promise<void>) | null) => {
+    setLockToggleHandler(() => handler);
+  }, []);
+
+  const toggleLockIn = React.useCallback(async () => {
+    if (lockToggleHandler) {
+      await lockToggleHandler();
+    }
+  }, [lockToggleHandler]);
+
   if (isLoading || !fontsLoaded) {
     return <StatusBar style="light" backgroundColor="#000000" />;
   }
@@ -246,24 +365,84 @@ export default function RootLayout() {
   }
 
   return (
-    <UserContext.Provider 
-      value={{ 
-        userData, 
-        setUserData: (data) => {
-          setUserData(data);
-          if (data) {
-            updateUserData(data);
-          }
-        },
-        resetToOnboarding
+    <LockControlContext.Provider
+      value={{
+        isLockedIn,
+        setIsLockedIn,
+        toggleLockIn,
+        registerLockToggle,
       }}
     >
-      <StatusBar style="light" backgroundColor="#000000" />
-      {hasCompletedOnboarding ? (
-        <TabsLayout />
-      ) : (
-        <OnboardingScreen onComplete={handleOnboardingComplete} />
-      )}
-    </UserContext.Provider>
+      <UserContext.Provider 
+        value={{ 
+          userData, 
+          setUserData: (data) => {
+            setUserData(data);
+            if (data) {
+              updateUserData(data);
+            }
+          },
+          resetToOnboarding
+        }}
+      >
+        <StatusBar style="light" backgroundColor="#000000" />
+        {hasCompletedOnboarding ? (
+          <TabsLayout />
+        ) : (
+          <OnboardingScreen onComplete={handleOnboardingComplete} />
+        )}
+      </UserContext.Provider>
+    </LockControlContext.Provider>
   );
 }
+
+const styles = StyleSheet.create({
+  tabBarWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 86,
+    justifyContent: 'flex-end',
+    backgroundColor: 'transparent',
+  },
+  tabBar: {
+    height: 80,
+    paddingBottom: 18,
+    paddingTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    backgroundColor: 'transparent',
+  },
+  tabItem: {
+    width: 70,
+    height: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabLabel: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  lockTabButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: strongColor,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: strongColor,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.32,
+    shadowRadius: 16,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  lockTabButtonPressed: {
+    backgroundColor: 'rgb(100, 65, 106)',
+    shadowColor: 'rgb(100, 65, 106)',
+  },
+});

@@ -1182,7 +1182,7 @@ export default function HomeScreen() {
                         style={[getAnimatedStyle(statusBannerAnimation), styles.statusBanner]}
                       >
                         <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                        <Text style={styles.statusText}>You're currently in a competition!</Text>
+                        <Text style={styles.statusText}>You&apos;re currently in a competition!</Text>
                       </Animated.View>
                     )}
 

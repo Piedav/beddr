@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRoute } from '@react-navigation/native';
 import { doc, onSnapshot } from 'firebase/firestore';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   ScrollView,
@@ -16,7 +16,6 @@ import { useUser } from './_layout';
 const bgColor = '#111124ff';
 const lbgColor = '#322f4e81';
 const l2bgColor = '#322f4eff';
-const l3bgColor = '#323150';
 const strongColor = '#cc7bdbff';
 const labelColor = 'rgb(180, 180, 188)';
 const defFontType = 'OpenSansSemiBold';
@@ -63,7 +62,7 @@ export default function CompetitionScreen() {
   const progressAnimation = useRef(new Animated.Value(0)).current;
   const contentAnimation = useRef(new Animated.Value(0)).current;
 
-  const startAnimations = () => {
+  const startAnimations = React.useCallback(() => {
     titleAnimation.setValue(0);
     statusAnimation.setValue(0);
     progressAnimation.setValue(0);
@@ -99,7 +98,7 @@ export default function CompetitionScreen() {
         useNativeDriver: true,
       }).start();
     }, 240);
-  };
+  }, [contentAnimation, progressAnimation, statusAnimation, titleAnimation]);
 
   const getAnimatedStyle = (animationValue: Animated.Value) => ({
     opacity: animationValue,
@@ -168,7 +167,7 @@ export default function CompetitionScreen() {
       const t = setTimeout(startAnimations, 80);
       return () => clearTimeout(t);
     }
-  }, [loading]);
+  }, [loading, startAnimations]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -177,7 +176,7 @@ export default function CompetitionScreen() {
         const t = setTimeout(startAnimations, 50);
         return () => clearTimeout(t);
       }
-    }, [loading])
+    }, [loading, startAnimations])
   );
 
   const getCompetitionStatus = (
@@ -267,21 +266,11 @@ export default function CompetitionScreen() {
   const status = getCompetitionStatus(competition?.start, competition?.end);
   const hasJoinedCompetition = !!competition?.players?.[userData?.uid ?? ''];
 
-  const rankedLeaderboard = useMemo(
-    () =>
-      getRankedLeaderboard(
-        competition?.players,
-        competition?.winType,
-        competition?.winVal,
-        userData?.uid
-      ),
-    [
-      competition?.players,
-      competition?.winType,
-      competition?.winVal,
-      userData?.uid,
-      playerNames,
-    ]
+  const rankedLeaderboard = getRankedLeaderboard(
+    competition?.players,
+    competition?.winType,
+    competition?.winVal,
+    userData?.uid
   );
 
   const myEntry = rankedLeaderboard.find((e) => e.isUser);
@@ -370,7 +359,7 @@ export default function CompetitionScreen() {
           </View>
         </Animated.View>
 
-        {hasJoinedCompetition && status != "upcoming" ? (
+        {hasJoinedCompetition && status !== "upcoming" ? (
           <Animated.View style={[getAnimatedStyle(progressAnimation), styles.card]}>
             <Text style={styles.cardTitle}>Your Standing</Text>
 
@@ -407,7 +396,7 @@ export default function CompetitionScreen() {
             </Text>
           </Animated.View>
         )}
-        {status != "upcoming" &&
+        {status !== "upcoming" &&
         <Animated.View style={[getAnimatedStyle(contentAnimation), styles.card]}>
           <Text style={styles.cardTitle}>Leaderboard</Text>
 

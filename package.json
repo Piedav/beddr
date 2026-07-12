@@ -10,7 +10,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "start:dev": "expo start --dev-client",
-    "ios:dev": "expo run: ios --device && expo start --dev-client"
+    "ios:dev": "expo run:ios --device && expo start --dev-client"
   },
   "dependencies": {
     "@expo/ngrok": "^4.1.3",

@@ -16,6 +16,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  Image,
   Linking,
   ScrollView,
   StyleSheet,
@@ -28,23 +29,31 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, firestore } from '../firebase';
 import { useUser } from './_layout';
 
-const dbgColor = "#0a0513ff";
 const bgColor = "#111124ff";
 const lbgColor = "#322f4e81";
 const l2bgColor = "#322f4eff";
-const l3bgColor = "#323150";
 const strongColor = "#cc7bdbff";
 
-const warmFontType = "Molengo";
 const defFontType = "OpenSansSemiBold";
 
 interface UserProfile {
   name?: string;
   totalLockedMinutes?: number;
   thisWeekLockedMinutes?: number;
+  lockedEvents?: LockedEvent[];
 }
 
 type WinType = 'number' | 'percentage' | 'team';
+
+type LockedEvent = {
+  timestamp: number;
+  lockedIn: boolean;
+};
+
+type LockedSession = {
+  start: number;
+  end: number;
+};
 
 interface Competition {
   id: string;
@@ -205,6 +214,89 @@ function formatDateRange(startMs: number, endMs: number) {
   return `${startFormatted} - ${endFormatted}`;
 }
 
+function formatMinutes(totalMinutes?: number) {
+  const minutes = Math.max(0, totalMinutes ?? 0);
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  return `${h}h ${m}m`;
+}
+
+function normalizeLockedEvents(events?: LockedEvent[]): LockedEvent[] {
+  if (!Array.isArray(events)) return [];
+  return [...events]
+    .filter(
+      (event) =>
+        event &&
+        typeof event.timestamp === 'number' &&
+        typeof event.lockedIn === 'boolean'
+    )
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function buildLockedSessions(
+  events?: LockedEvent[],
+  nowMs: number = Date.now()
+): LockedSession[] {
+  const sorted = normalizeLockedEvents(events);
+  const sessions: LockedSession[] = [];
+  let currentStart: number | null = null;
+
+  sorted.forEach((event) => {
+    if (event.lockedIn) {
+      if (currentStart === null) currentStart = event.timestamp;
+      return;
+    }
+
+    if (currentStart !== null && event.timestamp > currentStart) {
+      sessions.push({ start: currentStart, end: event.timestamp });
+      currentStart = null;
+    }
+  });
+
+  if (currentStart !== null && nowMs > currentStart) {
+    sessions.push({ start: currentStart, end: nowMs });
+  }
+
+  return sessions;
+}
+
+function getLockedMinutesInRange(
+  events: LockedEvent[] | undefined,
+  rangeStart: number,
+  rangeEnd: number,
+  nowMs: number = Date.now()
+) {
+  const sessions = buildLockedSessions(events, nowMs);
+
+  const totalMs = sessions.reduce((sum, session) => {
+    const start = Math.max(session.start, rangeStart);
+    const end = Math.min(session.end, rangeEnd);
+    return sum + Math.max(0, end - start);
+  }, 0);
+
+  return Math.floor(totalMs / 60000);
+}
+
+function getStartOfWeekMs(date = new Date()) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d.getTime();
+}
+
+function getAllTimeLockedMinutes(events?: LockedEvent[]) {
+  return buildLockedSessions(events).reduce(
+    (sum, session) => sum + Math.floor((session.end - session.start) / 60000),
+    0
+  );
+}
+
+function getThisWeekLockedMinutes(events?: LockedEvent[]) {
+  const now = Date.now();
+  return getLockedMinutesInRange(events, getStartOfWeekMs(new Date(now)), now, now);
+}
+
 
 
 export default function ProfileScreen() {
@@ -337,6 +429,12 @@ export default function ProfileScreen() {
       .sort((a, b) => b.end - a.end);
   }, [competitions, userData?.uid]);
 
+  const joinedCompetitions = useMemo(() => {
+    if (!userData?.uid) return [];
+
+    return competitions.filter((comp) => !!comp.players?.[userData.uid]);
+  }, [competitions, userData?.uid]);
+
   useEffect(() => {
     competitionAnimations.length = 0;
     finishedCompetitions.forEach(() => {
@@ -346,6 +444,13 @@ export default function ProfileScreen() {
 
   const stats = useMemo(() => {
     const totalCompetitions = finishedCompetitions.length;
+    const totalJoinedCompetitions = joinedCompetitions.length;
+    const activeCompetitions = joinedCompetitions.filter(
+      (comp) => getCompetitionStatus(comp.start, comp.end) === 'ongoing'
+    ).length;
+    const upcomingCompetitions = joinedCompetitions.filter(
+      (comp) => getCompetitionStatus(comp.start, comp.end) === 'upcoming'
+    ).length;
 
     const bestRank =
       totalCompetitions > 0
@@ -371,15 +476,29 @@ export default function ProfileScreen() {
       0
     );
 
+    const podiums = finishedCompetitions.filter(
+      (c) => c.rank > 0 && c.rank <= 3
+    ).length;
+
+    const averagePoints =
+      totalCompetitions > 0
+        ? Math.round(totalCompetitionPoints / totalCompetitions)
+        : 0;
+
     return {
+      totalJoinedCompetitions,
       totalCompetitions,
+      activeCompetitions,
+      upcomingCompetitions,
       bestRank,
       wins,
       winRate,
       avgRank,
       totalCompetitionPoints,
+      podiums,
+      averagePoints,
     };
-  }, [finishedCompetitions]);
+  }, [finishedCompetitions, joinedCompetitions]);
 
   const startAnimations = () => {
     titleAnimation.setValue(0);
@@ -586,6 +705,20 @@ export default function ProfileScreen() {
   }
 
   const displayName = userProfile?.name || userData?.name || 'User';
+  const profilePicture = userData?.profilePicture;
+  const initials = displayName
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || 'U';
+  const totalLockedMinutes =
+    userProfile?.totalLockedMinutes ?? getAllTimeLockedMinutes(userProfile?.lockedEvents);
+  const weeklyLockedMinutes =
+    userProfile?.thisWeekLockedMinutes ?? getThisWeekLockedMinutes(userProfile?.lockedEvents);
+  const totalLockedText = formatMinutes(totalLockedMinutes);
+  const weeklyLockedText = formatMinutes(weeklyLockedMinutes);
+  const bestRankText = stats.bestRank ? `#${stats.bestRank}` : 'N/A';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -600,15 +733,39 @@ export default function ProfileScreen() {
         <View style={styles.content}>
           {hasInitialized && (
             <>
-              <Animated.View style={getAnimatedStyle(titleAnimation)}>
-                <Text style={styles.title}>
-                  <Text style={styles.username}>{displayName}</Text>
-                  <Text style={styles.username}>'s</Text> Profile
-                </Text>
+              <Animated.View style={[getAnimatedStyle(titleAnimation), styles.profileHero]}>
+                <View style={styles.avatarWrap}>
+                  {profilePicture ? (
+                    <Image source={{ uri: profilePicture }} style={styles.avatarImage} />
+                  ) : (
+                    <Text style={styles.avatarInitials}>{initials}</Text>
+                  )}
+                </View>
+
+                <View style={styles.heroCopy}>
+                  <Text style={styles.profileLabel}>Profile</Text>
+                  <Text style={styles.title}>{displayName}</Text>
+                  <Text style={styles.emailText}>{userData.email}</Text>
+                </View>
               </Animated.View>
 
               <Animated.View style={[getAnimatedStyle(nameEditorAnimation), styles.nameEditorCard]}>
-                <Text style={styles.sectionMiniTitle}>Display Name: {displayName}</Text>
+                <View style={styles.cardHeaderRow}>
+                  <View>
+                    <Text style={styles.sectionMiniTitle}>Display Name</Text>
+                    <Text style={styles.cardHeaderValue}>{displayName}</Text>
+                  </View>
+
+                  {!isEditingName && (
+                    <TouchableOpacity
+                      style={styles.editNameButton}
+                      onPress={() => setIsEditingName(true)}
+                    >
+                      <Ionicons name="create-outline" size={18} color={strongColor} />
+                      <Text style={styles.editNameText}>Edit</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
 
                 {isEditingName ? (
                   <>
@@ -644,50 +801,100 @@ export default function ProfileScreen() {
                       </TouchableOpacity>
                     </View>
                   </>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.editNameButton}
-                    onPress={() => setIsEditingName(true)}
-                  >
-                    <Ionicons name="create-outline" size={18} color={strongColor} />
-                    <Text style={styles.editNameText}>Edit Name</Text>
-                  </TouchableOpacity>
-                )}
+                ) : null}
               </Animated.View>
 
-              <Animated.View style={[getAnimatedStyle(statsAnimation), styles.statsContainer]}>
-                <View style={styles.statCard}>
-                  <View style={styles.iconContainer}>
-                    <Ionicons name="trophy" size={28} color={strongColor} />
+              <Animated.View style={[getAnimatedStyle(statsAnimation), styles.lockSummaryCard]}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Lock-In Summary</Text>
+                  <View style={styles.pill}>
+                    <Ionicons name="lock-closed" size={14} color={strongColor} />
+                    <Text style={styles.pillText}>Focus</Text>
                   </View>
-                  <Text style={styles.statValue}>{stats.totalCompetitions}</Text>
-                  <Text style={styles.statLabel}>Finished Competitions</Text>
                 </View>
 
-                <View style={styles.statCard}>
-                  <View style={styles.iconContainer}>
-                    <Ionicons name="medal-outline" size={28} color={strongColor} />
+                <View style={styles.lockSummaryGrid}>
+                  <View style={styles.lockMetric}>
+                    <Text style={styles.lockMetricValue}>{totalLockedText}</Text>
+                    <Text style={styles.lockMetricLabel}>All-time locked</Text>
                   </View>
-                  <Text style={styles.statValue}>{stats.wins}</Text>
-                  <Text style={styles.statLabel}>Wins</Text>          
+
+                  <View style={styles.lockDivider} />
+
+                  <View style={styles.lockMetric}>
+                    <Text style={styles.lockMetricValue}>{weeklyLockedText}</Text>
+                    <Text style={styles.lockMetricLabel}>This week</Text>
+                  </View>
                 </View>
               </Animated.View>
 
-              <Animated.View style={[getAnimatedStyle(statsAnimation), styles.statsContainer]}>
-                <View style={styles.statCard}>
-                  <View style={styles.iconContainer}>
-                    <Ionicons name="bar-chart" size={28} color={strongColor} />
-                  </View>
-                  <Text style={styles.statValue}>{stats.avgRank ?? 'N/A'}</Text>
-                  <Text style={styles.statLabel}>Average Rank</Text>
+              <Animated.View style={getAnimatedStyle(statsAnimation)}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Competition Stats</Text>
+                  <Text style={styles.sectionMeta}>
+                    {stats.totalJoinedCompetitions} joined
+                  </Text>
                 </View>
 
-                <View style={styles.statCard}>
-                  <View style={styles.iconContainer}>
-                    <Ionicons name="star" size={28} color={strongColor} />
+                <View style={styles.statsGrid}>
+                  <View style={styles.statCard}>
+                    <View style={styles.iconContainer}>
+                      <Ionicons name="trophy" size={22} color={strongColor} />
+                    </View>
+                    <Text style={styles.statValue}>{stats.wins}</Text>
+                    <Text style={styles.statLabel}>Wins</Text>
                   </View>
-                  <Text style={styles.statValue}>{stats.totalCompetitionPoints}</Text>
-                  <Text style={styles.statLabel}>Total Finished Competition Points</Text>
+
+                  <View style={styles.statCard}>
+                    <View style={styles.iconContainer}>
+                      <Ionicons name="podium-outline" size={22} color={strongColor} />
+                    </View>
+                    <Text style={styles.statValue}>{stats.podiums}</Text>
+                    <Text style={styles.statLabel}>Top 3 Finishes</Text>
+                  </View>
+
+                  <View style={styles.statCard}>
+                    <View style={styles.iconContainer}>
+                      <Ionicons name="analytics" size={22} color={strongColor} />
+                    </View>
+                    <Text style={styles.statValue}>{stats.winRate}%</Text>
+                    <Text style={styles.statLabel}>Win Rate</Text>
+                  </View>
+
+                  <View style={styles.statCard}>
+                    <View style={styles.iconContainer}>
+                      <Ionicons name="medal-outline" size={22} color={strongColor} />
+                    </View>
+                    <Text style={styles.statValue}>{bestRankText}</Text>
+                    <Text style={styles.statLabel}>Best Rank</Text>
+                  </View>
+                </View>
+
+                <View style={styles.detailStatsCard}>
+                  <View style={styles.detailStatRow}>
+                    <Text style={styles.detailStatLabel}>Finished competitions</Text>
+                    <Text style={styles.detailStatValue}>{stats.totalCompetitions}</Text>
+                  </View>
+                  <View style={styles.detailStatRow}>
+                    <Text style={styles.detailStatLabel}>Active competitions</Text>
+                    <Text style={styles.detailStatValue}>{stats.activeCompetitions}</Text>
+                  </View>
+                  <View style={styles.detailStatRow}>
+                    <Text style={styles.detailStatLabel}>Upcoming competitions</Text>
+                    <Text style={styles.detailStatValue}>{stats.upcomingCompetitions}</Text>
+                  </View>
+                  <View style={styles.detailStatRow}>
+                    <Text style={styles.detailStatLabel}>Average rank</Text>
+                    <Text style={styles.detailStatValue}>{stats.avgRank ?? 'N/A'}</Text>
+                  </View>
+                  <View style={styles.detailStatRow}>
+                    <Text style={styles.detailStatLabel}>Average points</Text>
+                    <Text style={styles.detailStatValue}>{stats.averagePoints}</Text>
+                  </View>
+                  <View style={[styles.detailStatRow, styles.detailStatRowLast]}>
+                    <Text style={styles.detailStatLabel}>Finished competition points</Text>
+                    <Text style={styles.detailStatValue}>{stats.totalCompetitionPoints}</Text>
+                  </View>
                 </View>
               </Animated.View>
               
@@ -891,32 +1098,86 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
-    paddingTop: 40,
+    paddingTop: 28,
     paddingBottom: 40,
   },
-  title: {
-    fontSize: 36,
-    fontWeight: '300',
-    color: '#FFFFFF',
-    marginBottom: 24,
-    textAlign: 'center',
-    fontFamily: warmFontType,
+  profileHero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: lbgColor,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(204, 123, 219, 0.22)',
   },
-  username: {
-    fontWeight: '600',
+  avatarWrap: {
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    backgroundColor: 'rgba(157, 78, 221, 0.15)',
+    borderWidth: 1.5,
+    borderColor: strongColor,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarInitials: {
     color: strongColor,
-    fontFamily: warmFontType,
+    fontFamily: defFontType,
+    fontSize: 26,
+    fontWeight: '700',
+  },
+  heroCopy: {
+    flex: 1,
+  },
+  profileLabel: {
+    color: strongColor,
+    fontSize: 12,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    fontFamily: defFontType,
+    marginBottom: 6,
+  },
+  title: {
+    fontSize: 30,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: defFontType,
+    marginBottom: 4,
+  },
+  emailText: {
+    color: '#B0B0B0',
+    fontSize: 13,
+    fontFamily: defFontType,
   },
   nameEditorCard: {
     backgroundColor: lbgColor,
     borderRadius: 16,
     padding: 16,
-    marginBottom: 24,
+    marginBottom: 18,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
   },
   sectionMiniTitle: {
     fontSize: 14,
     color: '#B0B0B0',
-    marginBottom: 12,
+    marginBottom: 6,
+    fontFamily: defFontType,
+  },
+  cardHeaderValue: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '600',
     fontFamily: defFontType,
   },
   nameInput: {
@@ -929,6 +1190,7 @@ const styles = StyleSheet.create({
     fontFamily: defFontType,
     borderWidth: 1,
     borderColor: strongColor,
+    marginTop: 14,
   },
   nameButtonRow: {
     flexDirection: 'row',
@@ -956,7 +1218,11 @@ const styles = StyleSheet.create({
   editNameButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(157, 78, 221, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
     gap: 8,
   },
   editNameText: {
@@ -965,18 +1231,79 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
-  statsContainer: {
+  lockSummaryCard: {
+    backgroundColor: lbgColor,
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 22,
+  },
+  sectionHeader: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 18,
+    marginBottom: 14,
+    gap: 12,
+  },
+  sectionMeta: {
+    color: '#B0B0B0',
+    fontSize: 12,
+    fontFamily: defFontType,
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(157, 78, 221, 0.15)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  pillText: {
+    color: strongColor,
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: defFontType,
+  },
+  lockSummaryGrid: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  lockMetric: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  lockMetricValue: {
+    color: '#FFFFFF',
+    fontSize: 30,
+    fontWeight: '700',
+    fontFamily: defFontType,
+    marginBottom: 4,
+  },
+  lockMetricLabel: {
+    color: '#B0B0B0',
+    fontSize: 12,
+    fontFamily: defFontType,
+    textAlign: 'center',
+  },
+  lockDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginHorizontal: 10,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 14,
   },
   statCard: {
-    flex: 1,
+    width: '48%',
     backgroundColor: lbgColor,
     borderRadius: 16,
-    padding: 20,
+    padding: 16,
     alignItems: 'center',
-    marginHorizontal: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
@@ -984,16 +1311,16 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   iconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(157, 78, 221, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   statValue: {
-    fontSize: 24,
+    fontSize: 23,
     fontWeight: '700',
     color: '#FFFFFF',
     marginBottom: 4,
@@ -1003,6 +1330,37 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#B0B0B0',
     textAlign: 'center',
+    fontFamily: defFontType,
+  },
+  detailStatsCard: {
+    backgroundColor: lbgColor,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    marginBottom: 22,
+  },
+  detailStatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+    gap: 18,
+  },
+  detailStatRowLast: {
+    borderBottomWidth: 0,
+  },
+  detailStatLabel: {
+    flex: 1,
+    color: '#B0B0B0',
+    fontSize: 14,
+    fontFamily: defFontType,
+  },
+  detailStatValue: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
     fontFamily: defFontType,
   },
   competitionsSection: {

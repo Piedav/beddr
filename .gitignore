@@ -27,6 +27,10 @@ GoogleService-Info.plist
 google-services.json
 android/app/google-services.json
 
+# Android signing files
+android/app/debug.keystore
+*.keystore
+
 # Native build folders (safe to ignore unless you intentionally manage them)
 android/.gradle/
 android/build/

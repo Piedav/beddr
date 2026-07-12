@@ -10,8 +10,6 @@ import OnboardingScreen from './onboarding'; //yeah
 
 const dbgColor = "#0a0513ff"; //dark background
 const bgColor = "#111124ff"; //background
-const lbgColor = "#322f4e81"; //light background
-const l2bgColor = "#322f4eff"; //2nd light background
 const l3bgColor = "#323150"; //3nd light background
 const strongColor = "#cc7bdbff"; //strong color
 
@@ -53,7 +51,7 @@ function TabsLayout() { //the tabs at the bottom :))
       screenOptions={{
         headerShown: false,
         sceneStyle: {
-          backgroundColor: 'bgColor',
+          backgroundColor: bgColor,
         },
         tabBarStyle: {
           backgroundColor: dbgColor,
@@ -232,11 +230,6 @@ export default function RootLayout() {
       setHasCompletedOnboarding(false);
       setIsLoading(false);
     }
-  };
-
-  // Function to logout (clear all data) - now uses resetToOnboarding
-  const logout = async () => {
-    await resetToOnboarding();
   };
   if (isLoading || !fontsLoaded) {
     return <StatusBar style="light" backgroundColor="#000000" />;

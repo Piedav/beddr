@@ -65,18 +65,18 @@ export default function OnboardingScreen({
   const [existingSignedInUser, setExistingSignedInUser] = useState<User | null>(null);
   const [showSignedInGate, setShowSignedInGate] = useState(false);
 
-  const animateContent = () => {
+  const animateContent = React.useCallback(() => {
     contentAnimation.setValue(0);
     Animated.timing(contentAnimation, {
       toValue: 1,
       duration: 300,
       useNativeDriver: true,
     }).start();
-  };
+  }, [contentAnimation]);
 
   useEffect(() => {
     animateContent();
-  }, [currentStep]);
+  }, [animateContent, currentStep]);
 
   const getContentAnimatedStyle = () => ({
     opacity: contentAnimation,

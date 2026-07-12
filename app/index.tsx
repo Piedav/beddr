@@ -255,9 +255,16 @@ export default function HomeScreen() {
   const homeLockoutNotificationIdRef = useRef<string | null>(null);
   const lastLockoutNotificationAtRef = useRef<number>(0);
   const defaultTabBarStyle = {
-    backgroundColor: dbgColor,
-    borderTopWidth: 2,
-    borderTopColor: l3bgColor,
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+    borderTopWidth: 0,
+    borderTopColor: 'transparent',
+    elevation: 0,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
     height: 80,
     paddingBottom: 20,
     paddingTop: 8,

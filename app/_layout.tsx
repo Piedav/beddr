@@ -8,9 +8,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react'; /
 import OnboardingScreen from './onboarding'; //yeah
 
 
-const dbgColor = "#0a0513ff"; //dark background
 const bgColor = "#111124ff"; //background
-const l3bgColor = "#323150"; //3nd light background
 const strongColor = "#cc7bdbff"; //strong color
 
 interface UserData { //format of data that gets shared through the async thingy
@@ -54,13 +52,21 @@ function TabsLayout() { //the tabs at the bottom :))
           backgroundColor: bgColor,
         },
         tabBarStyle: {
-          backgroundColor: dbgColor,
-          borderTopWidth: 2,
-          borderTopColor: l3bgColor,
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'transparent',
+          borderTopWidth: 0,
+          borderTopColor: 'transparent',
+          elevation: 0,
+          shadowColor: 'transparent',
+          shadowOpacity: 0,
           height: 80,
           paddingBottom: 20,
           paddingTop: 8,
         },
+        tabBarBackground: () => null,
         tabBarActiveTintColor: strongColor,
         tabBarInactiveTintColor: '#B0B0B0',
         tabBarLabelStyle: {

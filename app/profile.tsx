@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { deleteUser } from 'firebase/auth';
+import { deleteUser, updateProfile } from 'firebase/auth';
 import {
   arrayUnion,
   collection,
@@ -354,7 +354,7 @@ export default function ProfileScreen() {
     );
 
     return unsubscribe;
-  }, [userData?.uid]);
+  }, [userData?.name, userData?.uid]);
 
   useEffect(() => {
     if (!userData?.uid) return;
@@ -440,7 +440,7 @@ export default function ProfileScreen() {
     finishedCompetitions.forEach(() => {
       competitionAnimations.push(new Animated.Value(0));
     });
-  }, [finishedCompetitions.length]);
+  }, [competitionAnimations, finishedCompetitions]);
 
   const stats = useMemo(() => {
     const totalCompetitions = finishedCompetitions.length;
@@ -500,7 +500,7 @@ export default function ProfileScreen() {
     };
   }, [finishedCompetitions, joinedCompetitions]);
 
-  const startAnimations = () => {
+  const startAnimations = React.useCallback(() => {
     titleAnimation.setValue(0);
     statsAnimation.setValue(0);
     nameEditorAnimation.setValue(0);
@@ -560,7 +560,14 @@ export default function ProfileScreen() {
         }, 70 * index);
       });
     }, staggerDelay * 4);
-  };
+  }, [
+    competitionAnimations,
+    competitionsAnimation,
+    nameEditorAnimation,
+    resetButtonAnimation,
+    statsAnimation,
+    titleAnimation,
+  ]);
 
   const getAnimatedStyle = (animationValue: Animated.Value) => ({
     opacity: animationValue,
@@ -578,7 +585,13 @@ export default function ProfileScreen() {
     if (!isLoadingProfile && !isLoadingCompetitions && userData) {
       setTimeout(() => startAnimations(), 100);
     }
-  }, [isLoadingProfile, isLoadingCompetitions, userData, finishedCompetitions.length]);
+  }, [
+    finishedCompetitions.length,
+    isLoadingCompetitions,
+    isLoadingProfile,
+    startAnimations,
+    userData,
+  ]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -586,7 +599,12 @@ export default function ProfileScreen() {
         setHasInitialized(false);
         setTimeout(() => startAnimations(), 50);
       }
-    }, [isLoadingProfile, isLoadingCompetitions, userData, finishedCompetitions.length])
+    }, [
+      isLoadingCompetitions,
+      isLoadingProfile,
+      startAnimations,
+      userData,
+    ])
   );
 
   const saveName = async () => {
@@ -607,9 +625,48 @@ export default function ProfileScreen() {
     setIsSavingName(true);
 
     try {
-      await updateDoc(doc(firestore, 'profiledb', userData.uid), {
+      const uid = userData.uid;
+      let nameUpdateBatch = writeBatch(firestore);
+      let batchWriteCount = 0;
+      const pendingCommits: Promise<void>[] = [];
+
+      const queueNameUpdate = (
+        ref: ReturnType<typeof doc>,
+        data: Record<string, unknown>
+      ) => {
+        nameUpdateBatch.update(ref, data);
+        batchWriteCount += 1;
+
+        if (batchWriteCount >= 450) {
+          pendingCommits.push(nameUpdateBatch.commit());
+          nameUpdateBatch = writeBatch(firestore);
+          batchWriteCount = 0;
+        }
+      };
+
+      queueNameUpdate(doc(firestore, 'profiledb', uid), {
         name: trimmed,
       });
+
+      competitions.forEach((competition) => {
+        if (!competition.players?.[uid]) return;
+
+        queueNameUpdate(doc(firestore, 'competitiondb', competition.id), {
+          [`players.${uid}.name`]: trimmed,
+        });
+      });
+
+      if (batchWriteCount > 0) {
+        pendingCommits.push(nameUpdateBatch.commit());
+      }
+
+      await Promise.all(pendingCommits);
+
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, {
+          displayName: trimmed,
+        });
+      }
 
       if (setUserData) {
         setUserData({

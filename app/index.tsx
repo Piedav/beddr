@@ -32,9 +32,12 @@ import { useLockControl, useUser } from './_layout';
 
 const dbgColor = '#0a0513ff';
 const bgColor = '#111124ff';
-const lbgColor = '#322f4e81';
-const l2bgColor = '#322f4eff';
-const l3bgColor = '#323150';
+const lbgColor = '#111124ff';
+const l2bgColor = '#111124ff';
+const l3bgColor = '#111124ff';
+// const lbgColor = '#322f4e81';
+// const l2bgColor = '#322f4eff';
+// const l3bgColor = '#323150';
 const strongColor = '#cc7bdbff';
 const buttonPressedColor = 'rgb(100, 65, 106)';
 
@@ -1228,6 +1231,7 @@ export default function HomeScreen() {
                 </View>
 
         {/* This is the button that toggles giving points and whanot*/}
+                {/*
                 <Animated.View style={getAnimatedStyle(progressAnimation)}>
                   <TouchableOpacity
                     style={[styles.theButton, theButtonPressed&&{backgroundColor: buttonPressedColor}]}
@@ -1247,7 +1251,7 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                   
                 </Animated.View>
-
+                */}
                 {!theButtonPressed && (
                 <>
                   <Animated.View style={getAnimatedStyle(competitionsAnimation)}>

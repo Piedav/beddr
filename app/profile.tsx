@@ -18,6 +18,8 @@ import {
   Animated,
   Image,
   Linking,
+  NativeModules,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -35,6 +37,22 @@ const l2bgColor = "#322f4eff";
 const strongColor = "#cc7bdbff";
 
 const defFontType = "OpenSansSemiBold";
+
+type BlockedSelectionSummary = {
+  isAvailable: boolean;
+  selectedApps: number;
+  selectedCategories: number;
+  selectedWebDomains: number;
+};
+
+type BeddrScreenTimeModule = {
+  getBlockedSelectionSummary: () => Promise<BlockedSelectionSummary>;
+  requestAuthorizationAndSelectApps: () => Promise<BlockedSelectionSummary>;
+};
+
+const BeddrScreenTime = NativeModules.BeddrScreenTime as
+  | BeddrScreenTimeModule
+  | undefined;
 
 interface UserProfile {
   name?: string;
@@ -311,6 +329,9 @@ export default function ProfileScreen() {
   const [nameInput, setNameInput] = useState('');
   const [isSavingName, setIsSavingName] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [blockedSelectionSummary, setBlockedSelectionSummary] =
+    useState<BlockedSelectionSummary | null>(null);
+  const [isPickingBlockedApps, setIsPickingBlockedApps] = useState(false);
 
   const titleAnimation = useRef(new Animated.Value(0)).current;
   const statsAnimation = useRef(new Animated.Value(0)).current;
@@ -393,6 +414,30 @@ export default function ProfileScreen() {
 
     return unsubscribe;
   }, [userData?.uid]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !BeddrScreenTime) {
+      setBlockedSelectionSummary({
+        isAvailable: false,
+        selectedApps: 0,
+        selectedCategories: 0,
+        selectedWebDomains: 0,
+      });
+      return;
+    }
+
+    BeddrScreenTime.getBlockedSelectionSummary()
+      .then(setBlockedSelectionSummary)
+      .catch((error) => {
+        console.error('Failed to load blocked app selection:', error);
+        setBlockedSelectionSummary({
+          isAvailable: false,
+          selectedApps: 0,
+          selectedCategories: 0,
+          selectedWebDomains: 0,
+        });
+      });
+  }, []);
 
   const finishedCompetitions = useMemo(() => {
     if (!userData?.uid) return [];
@@ -750,6 +795,30 @@ export default function ProfileScreen() {
       ]
     );
   };
+
+  const handleChooseBlockedApps = async () => {
+    if (Platform.OS !== 'ios' || !BeddrScreenTime) {
+      Alert.alert(
+        'Screen Time setup needed',
+        'App blocking uses Apple Screen Time and needs a rebuilt iOS app with the BeddrScreenTime native module.'
+      );
+      return;
+    }
+
+    setIsPickingBlockedApps(true);
+
+    try {
+      const summary = await BeddrScreenTime.requestAuthorizationAndSelectApps();
+      setBlockedSelectionSummary(summary);
+    } catch (error: any) {
+      const message =
+        error?.message ||
+        'Could not open the Screen Time app picker. Make sure you are testing on a real iPhone with Family Controls enabled.';
+      Alert.alert('Could not choose apps', message);
+    } finally {
+      setIsPickingBlockedApps(false);
+    }
+  };
   if (isLoadingProfile || isLoadingCompetitions || !userData) {
     return (
       <SafeAreaView style={styles.container}>
@@ -776,6 +845,10 @@ export default function ProfileScreen() {
   const totalLockedText = formatMinutes(totalLockedMinutes);
   const weeklyLockedText = formatMinutes(weeklyLockedMinutes);
   const bestRankText = stats.bestRank ? `#${stats.bestRank}` : 'N/A';
+  const blockedItemCount =
+    (blockedSelectionSummary?.selectedApps ?? 0) +
+    (blockedSelectionSummary?.selectedCategories ?? 0) +
+    (blockedSelectionSummary?.selectedWebDomains ?? 0);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -883,6 +956,55 @@ export default function ProfileScreen() {
                     <Text style={styles.lockMetricLabel}>This week</Text>
                   </View>
                 </View>
+              </Animated.View>
+
+              <Animated.View style={[getAnimatedStyle(statsAnimation), styles.blockedAppsCard]}>
+                <View style={styles.sectionHeader}>
+                  <View>
+                    <Text style={styles.sectionTitle}>Lock-In Blocking</Text>
+                    <Text style={styles.blockedAppsSubtitle}>
+                      Choose the apps Beddr blocks when you lock in.
+                    </Text>
+                  </View>
+
+                  <View style={styles.pill}>
+                    <Ionicons name="shield-checkmark-outline" size={14} color={strongColor} />
+                    <Text style={styles.pillText}>Screen Time</Text>
+                  </View>
+                </View>
+
+                <View style={styles.blockedAppsSummaryRow}>
+                  <View style={styles.blockedAppsIconWrap}>
+                    <Ionicons name="apps-outline" size={24} color={strongColor} />
+                  </View>
+
+                  <View style={styles.blockedAppsSummaryCopy}>
+                    <Text style={styles.blockedAppsCount}>
+                      {blockedItemCount > 0
+                        ? `${blockedItemCount} selected`
+                        : 'No apps selected yet'}
+                    </Text>
+                    <Text style={styles.blockedAppsDetail}>
+                      {blockedSelectionSummary?.isAvailable === false
+                        ? 'Available on real iPhone builds after native setup.'
+                        : 'Apple keeps selected app names private, so Beddr stores secure tokens only.'}
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.chooseAppsButton,
+                    isPickingBlockedApps && styles.chooseAppsButtonDisabled,
+                  ]}
+                  onPress={handleChooseBlockedApps}
+                  disabled={isPickingBlockedApps}
+                >
+                  <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
+                  <Text style={styles.chooseAppsButtonText}>
+                    {isPickingBlockedApps ? 'Opening Picker...' : 'Choose Apps to Block'}
+                  </Text>
+                </TouchableOpacity>
               </Animated.View>
 
               <Animated.View style={getAnimatedStyle(statsAnimation)}>
@@ -1293,6 +1415,71 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 18,
     marginBottom: 22,
+  },
+  blockedAppsCard: {
+    backgroundColor: lbgColor,
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(204, 123, 219, 0.16)',
+  },
+  blockedAppsSubtitle: {
+    color: '#B0B0B0',
+    fontSize: 13,
+    fontFamily: defFontType,
+    maxWidth: 220,
+  },
+  blockedAppsSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(17, 17, 36, 0.42)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+    gap: 12,
+  },
+  blockedAppsIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(157, 78, 221, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  blockedAppsSummaryCopy: {
+    flex: 1,
+  },
+  blockedAppsCount: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+    fontFamily: defFontType,
+    marginBottom: 4,
+  },
+  blockedAppsDetail: {
+    color: '#B0B0B0',
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: defFontType,
+  },
+  chooseAppsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: strongColor,
+    borderRadius: 14,
+    paddingVertical: 13,
+    gap: 8,
+  },
+  chooseAppsButtonDisabled: {
+    opacity: 0.68,
+  },
+  chooseAppsButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: defFontType,
   },
   sectionHeader: {
     flexDirection: 'row',

@@ -1,8 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { useKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Notifications from 'expo-notifications';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   arrayUnion,
@@ -20,6 +18,8 @@ import {
   Animated,
   AppState,
   AppStateStatus,
+  NativeModules,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -44,14 +44,20 @@ const buttonPressedColor = 'rgb(100, 65, 106)';
 const warmFontType = 'Molengo';
 const defFontType = 'OpenSansSemiBold';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
-});
+type BeddrScreenTimeLockModule = {
+  applyBlockedAppRestrictions: () => Promise<{
+    applied?: boolean;
+    selectedApps?: number;
+    selectedCategories?: number;
+    selectedWebDomains?: number;
+  }>;
+  clearBlockedAppRestrictions: () => Promise<{ cleared?: boolean }>;
+};
+
+const BeddrScreenTime = NativeModules.BeddrScreenTime as
+  | BeddrScreenTimeLockModule
+  | undefined;
+
 interface UserProfile {
   name: string;
   lockedEvents: [];
@@ -255,75 +261,6 @@ export default function HomeScreen() {
   const [thisWeekLockedMinutes, setThisWeekLockedMinutes] = useState(0);
   const [lockedEvents, setLockedEvents] = useState<LockedEvent[]>([]);
   const [nowMs, setNowMs] = useState(Date.now());
-  const homeLockoutNotificationIdRef = useRef<string | null>(null);
-  const lastLockoutNotificationAtRef = useRef<number>(0);
-  
-  
-  useEffect(() => {
-    requestNotificationPermission().catch(console.error);
-  }, []);
-  const requestNotificationPermission = async () => {
-    const settings = await Notifications.getPermissionsAsync();
-
-    if (settings.granted || settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
-      return true;
-    }
-
-    const req = await Notifications.requestPermissionsAsync({
-      ios: {
-        allowAlert: true,
-        allowBadge: false,
-        allowSound: false,
-      },
-    });
-
-    return !!(req.granted || req.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL);
-  };
-
-  const scheduleHomeLockoutNotification = async () => {
-    const now = Date.now();
-
-    // debounce so repeated app-state churn doesn't spam notifications
-    if (now - lastLockoutNotificationAtRef.current < 8000) return;
-
-    lastLockoutNotificationAtRef.current = now;
-
-    const hasPermission = await requestNotificationPermission();
-    if (!hasPermission) return;
-
-    // cancel previous pending one if any
-    if (homeLockoutNotificationIdRef.current) {
-      try {
-        await Notifications.cancelScheduledNotificationAsync(
-          homeLockoutNotificationIdRef.current
-        );
-      } catch {}
-      homeLockoutNotificationIdRef.current = null;
-    }
-
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'Locked out',
-        body: 'You left Beddr, so your lock-in session ended.',
-        sound: false,
-      },
-      trigger: null, // immediate local notification
-    });
-
-    homeLockoutNotificationIdRef.current = id;
-  };
-
-  const cancelHomeLockoutNotification = async () => {
-    if (!homeLockoutNotificationIdRef.current) return;
-
-    try {
-      await Notifications.cancelScheduledNotificationAsync(
-        homeLockoutNotificationIdRef.current
-      );
-    } catch {}
-
-    homeLockoutNotificationIdRef.current = null;
-  };
 
 
   
@@ -350,11 +287,7 @@ export default function HomeScreen() {
 
   const [collapseFinished, setCollapseFinished] = useState(true);
   const [theButtonPressed, setTheButtonPressed] = useState(false);
-  
-  const KeepAwakeOn = () => {
-    useKeepAwake();
-    return null;
-  }
+
   useEffect(() => {
     if (!theButtonPressed) return;
 
@@ -448,12 +381,15 @@ export default function HomeScreen() {
     });
     return unsub;
   }, []);
+
+  const currentMinuteBucket = Math.floor(nowMs / 60000);
+
   useEffect(() => {
     if (!uid) return;
     if (!competitions.length) return;
 
     syncAllJoinedCompetitionPoints(uid, lockedEvents, competitions).catch(console.error);
-  }, [uid, lockedEvents, competitions.length]);
+  }, [uid, lockedEvents, competitions.length, currentMinuteBucket]);
 
   const startAnimations = () => {
     welcomeAnimation.setValue(0);
@@ -545,39 +481,8 @@ export default function HomeScreen() {
   const theButtonPressedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
 
-  useEffect(() => {
-    if (!uid) return;
-    if (!pendingFalseEventRef.current) return;
-
-    flushPendingFalseEvent().catch(console.error);
-  }, [uid]);
-
-  
-
-  
-  const pendingFalseEventRef = useRef(false);
   const isWritingFalseEventRef = useRef(false);
-  const pendingFalseTimestampRef = useRef<number | null>(null);
-  const markPendingLockOut = async (timestamp?: number) => {
-    if (!uid) return;
-
-    const profileRef = doc(firestore, 'profiledb', uid);
-
-    try {
-      await setDoc(
-        profileRef,
-        {
-          pendingLockOut: true,
-          pendingLockOutTimestamp: timestamp ?? Date.now(),
-        },
-        { merge: true }
-      );
-      console.log('Marked pending lock-out');
-    } catch (e) {
-      console.error('Failed to mark pending lock-out', e);
-    }
-  };
-  const flushPendingLockOutFromProfile = async (profileData?: any) => {
+  const clearLegacyPendingLockOut = async (profileData?: any) => {
     if (!uid) return false;
     if (!profileData?.pendingLockOut) return false;
     if (isWritingFalseEventRef.current) return false;
@@ -586,58 +491,21 @@ export default function HomeScreen() {
     const profileRef = doc(firestore, 'profiledb', uid);
 
     try {
-      const ts =
-        typeof profileData?.pendingLockOutTimestamp === 'number'
-          ? profileData.pendingLockOutTimestamp
-          : Date.now();
-
       await updateDoc(profileRef, {
-        lockedEvents: arrayUnion({
-          timestamp: ts,
-          lockedIn: false,
-        }),
         pendingLockOut: false,
         pendingLockOutTimestamp: null,
       });
 
-      console.log('Flushed pending lock-out from profile');
+      console.log('Cleared legacy pending lock-out without ending session');
       return true;
     } catch (e) {
-      console.error('Failed to flush pending lock-out from profile', e);
+      console.error('Failed to clear legacy pending lock-out', e);
       return false;
     } finally {
       isWritingFalseEventRef.current = false;
     }
   };
-  const flushPendingFalseEvent = async () => {
-    if (!pendingFalseEventRef.current) return;
-    if (isWritingFalseEventRef.current) return;
-    if (!uid) {
-      console.log('flushPendingFalseEvent: waiting for uid');
-      return;
-    }
 
-    isWritingFalseEventRef.current = true;
-
-    try {
-      const wrote = await recordEvent(
-        false,
-        pendingFalseTimestampRef.current ?? undefined
-      );
-
-      if (wrote) {
-        console.log('Flushed pending lockedIn:false event');
-        pendingFalseEventRef.current = false;
-        pendingFalseTimestampRef.current = null;
-      } else {
-        console.log('Pending false event not flushed yet; keeping pending flag');
-      }
-    } catch (e) {
-      console.error('Failed to flush pending lockedIn:false event', e);
-    } finally {
-      isWritingFalseEventRef.current = false;
-    }
-  };
   useEffect(() => {
     console.log('AppState effect registered');
 
@@ -645,60 +513,11 @@ export default function HomeScreen() {
       const prevState = appStateRef.current;
       console.log('AppState:', prevState, '->', nextAppState);
 
-      // mark when app first becomes inactive
-      // if (nextAppState === 'inactive') {
-      //   lastInactiveAtRef.current = Date.now();
-      // }
-
-      // decide whether this was likely app switch / home gesture
-      // if (prevState === 'inactive' && nextAppState === 'background') {
-      //   const inactiveAt = lastInactiveAtRef.current;
-      //   const elapsed = inactiveAt ? Date.now() - inactiveAt : null;
-
-      //   if (elapsed !== null) {
-      //     if (elapsed < 200) {
-      //       console.log('Probably lock screen');
-      //       console.log(elapsed);
-      //     } else {
-      //       console.log('Probably home screen / app switch');
-      //       console.log(elapsed);
-      //     }
-      //   }
-      // }
-
-      if (
-        prevState === 'active' &&
-        (nextAppState === 'inactive' || nextAppState === 'background')
-      ) {
-        const wasLockedIn = theButtonPressedRef.current;
-
-        if (!wasLockedIn) {
-          console.log('app left while already locked out; no notification');
-          appStateRef.current = nextAppState;
-          return;
-        }
-
-        console.log('app left while locked in');
-
-        theButtonPressedRef.current = false;
-        setTheButtonPressed(false);
-        setIsLockedIn(false);
-
-        const leaveTs = Date.now();
-        pendingFalseEventRef.current = true;
-        pendingFalseTimestampRef.current = leaveTs;
-
-        await markPendingLockOut(leaveTs);
-        await scheduleHomeLockoutNotification();
-      }
-
-      // once app becomes active again, flush the pending false event
       if (
         (prevState === 'background' || prevState === 'inactive') &&
         nextAppState === 'active'
       ) {
-        await cancelHomeLockoutNotification();
-        await flushPendingFalseEvent();
+        setNowMs(Date.now());
       }
 
       appStateRef.current = nextAppState;
@@ -807,10 +626,15 @@ export default function HomeScreen() {
           const profileData = docSnapshot.data() as any;
           setUserProfile(profileData);
           if (profileData?.pendingLockOut) {
-            flushPendingLockOutFromProfile(profileData).catch(console.error);
+            clearLegacyPendingLockOut(profileData).catch(console.error);
           }
           const events = (profileData?.lockedEvents ?? []) as LockedEvent[];
           setLockedEvents(events);
+          const latestEvent = normalizeLockedEvents(events).at(-1);
+          const isCurrentlyLocked = latestEvent?.lockedIn === true;
+          theButtonPressedRef.current = isCurrentlyLocked;
+          setTheButtonPressed(isCurrentlyLocked);
+          setIsLockedIn(isCurrentlyLocked);
 
           // const total = getAllTimeLockedMinutes(events);
           // const week = getThisWeekLockedMinutes(events);
@@ -1035,9 +859,56 @@ export default function HomeScreen() {
     ],
   });
 
+  const applyLockInRestrictions = React.useCallback(async () => {
+    if (Platform.OS !== 'ios' || !BeddrScreenTime) return true;
+
+    try {
+      const result = await BeddrScreenTime.applyBlockedAppRestrictions();
+      const selectedCount =
+        (result.selectedApps ?? 0) +
+        (result.selectedCategories ?? 0) +
+        (result.selectedWebDomains ?? 0);
+
+      if (!result.applied || selectedCount === 0) {
+        Alert.alert(
+          'Choose apps first',
+          'Pick at least one app, category, or website in Profile before locking in.'
+        );
+        return false;
+      }
+
+      return true;
+    } catch (error: any) {
+      console.error('Failed to apply Screen Time restrictions:', error);
+      Alert.alert(
+        'Could not block apps',
+        error?.message ||
+          'Beddr could not apply Screen Time restrictions, so lock-in did not start.'
+      );
+      return false;
+    }
+  }, []);
+
+  const clearLockInRestrictions = React.useCallback(async () => {
+    if (Platform.OS !== 'ios' || !BeddrScreenTime) return;
+
+    try {
+      await BeddrScreenTime.clearBlockedAppRestrictions();
+    } catch (error) {
+      console.error('Failed to clear Screen Time restrictions:', error);
+    }
+  }, []);
+
   const toggleLockIn = React.useCallback(async () => {
     const next = !theButtonPressedRef.current;
     const now = Date.now();
+
+    if (next) {
+      const restrictionsApplied = await applyLockInRestrictions();
+      if (!restrictionsApplied) return;
+    } else {
+      await clearLockInRestrictions();
+    }
 
     theButtonPressedRef.current = next;
     setTheButtonPressed(next);
@@ -1049,7 +920,7 @@ export default function HomeScreen() {
     // } else {
     //   await stopLockInLiveActivity();
     // }
-  }, [recordEvent, setIsLockedIn]);
+  }, [applyLockInRestrictions, clearLockInRestrictions, recordEvent, setIsLockedIn]);
 
   useEffect(() => {
     setIsLockedIn(theButtonPressed);
@@ -1150,7 +1021,6 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={{ ...styles.container, backgroundColor: bgColor,}}>
-      {theButtonPressed && <KeepAwakeOn />}
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={true}

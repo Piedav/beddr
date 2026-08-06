@@ -102,7 +102,7 @@ function BeddrTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       });
 
       if (!focused && !event.defaultPrevented) {
-        navigation.navigate(route.name, route.params);
+        navigation.navigate(route.name, route.name === 'competition' ? {} : route.params);
       }
     };
 

@@ -960,7 +960,7 @@ export default function ProfileScreen() {
 
               <Animated.View style={[getAnimatedStyle(statsAnimation), styles.blockedAppsCard]}>
                 <View style={styles.sectionHeader}>
-                  <View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={styles.sectionTitle}>Lock-In Blocking</Text>
                     <Text style={styles.blockedAppsSubtitle}>
                       Choose the apps Beddr blocks when you lock in.

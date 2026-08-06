@@ -24,7 +24,7 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { SlimeCompanion } from '../components/SlimeCompanion';
+import { BlobCompanion } from '../components/BlobCompanion';
 import { auth, firestore } from '../firebase';
 import { useLockControl, useUser } from './_layout';
 
@@ -691,17 +691,14 @@ export default function HomeScreen() {
     return unsubscribe;
   }, [uid]);
 
-  useEffect(() => {
-    if (!profileLoading && !competitionsLoading && uid) {
-      setTimeout(() => startAnimations(), 100);
-    }
-  }, [profileLoading, competitionsLoading, uid]);
+  const hasAnimatedRef = useRef(false);
 
   useFocusEffect(
     React.useCallback(() => {
+      if (hasAnimatedRef.current) return;
       if (!profileLoading && !competitionsLoading && uid) {
-        setHasInitialized(false);
-        setTimeout(() => startAnimations(), 50);
+        hasAnimatedRef.current = true;
+        setTimeout(() => startAnimations(), 100);
       }
     }, [profileLoading, competitionsLoading, uid])
   );
@@ -966,7 +963,7 @@ export default function HomeScreen() {
                       </View>
                     </View>
                   )}
-                  <SlimeCompanion
+                  <BlobCompanion
                     hue={userProfile?.companionHue ?? 0}
                     style={styles.companion}
                   />

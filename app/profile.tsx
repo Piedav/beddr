@@ -29,7 +29,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { SlimeCompanion } from '../components/SlimeCompanion';
+import { BlobCompanion } from '../components/BlobCompanion';
 import { auth, firestore } from '../firebase';
 import { useUser } from './_layout';
 
@@ -636,30 +636,16 @@ export default function ProfileScreen() {
     ],
   });
 
-  useEffect(() => {
-    if (!isLoadingProfile && !isLoadingCompetitions && userData) {
-      setTimeout(() => startAnimations(), 100);
-    }
-  }, [
-    finishedCompetitions.length,
-    isLoadingCompetitions,
-    isLoadingProfile,
-    startAnimations,
-    userData,
-  ]);
+  const hasAnimatedRef = useRef(false);
 
   useFocusEffect(
     React.useCallback(() => {
+      if (hasAnimatedRef.current) return;
       if (!isLoadingProfile && !isLoadingCompetitions && userData) {
-        setHasInitialized(false);
-        setTimeout(() => startAnimations(), 50);
+        hasAnimatedRef.current = true;
+        setTimeout(() => startAnimations(), 100);
       }
-    }, [
-      isLoadingCompetitions,
-      isLoadingProfile,
-      startAnimations,
-      userData,
-    ])
+    }, [isLoadingCompetitions, isLoadingProfile, startAnimations, userData])
   );
 
   const saveName = async () => {
@@ -845,7 +831,7 @@ export default function ProfileScreen() {
     } catch (error) {
       console.error('Failed to save companion hue:', error);
       setCompanionHue(previousHue);
-      Alert.alert('Could not save color', 'Please try choosing the slime color again.');
+      Alert.alert('Could not save color', 'Please try choosing the blob color again.');
     } finally {
       isAdjustingCompanionHue.current = false;
       setIsSavingCompanionHue(false);
@@ -991,7 +977,7 @@ export default function ProfileScreen() {
                 </View>
 
                 <View style={[styles.companionColorSection, { flex: 1, minWidth: 0 }]}>
-                  <SlimeCompanion hue={companionHue} size={128} />
+                  <BlobCompanion hue={companionHue} size={128} />
 
                   <View style={styles.companionColorControls}>
                     <View style={styles.companionColorHeader}>
@@ -1007,7 +993,7 @@ export default function ProfileScreen() {
                     </View>
 
                     <Slider
-                      accessibilityLabel="Slime color hue"
+                      accessibilityLabel="Blob color hue"
                       maximumTrackTintColor="rgba(255,255,255,0.18)"
                       maximumValue={359}
                       minimumTrackTintColor={strongColor}

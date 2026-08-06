@@ -4,7 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { arrayUnion, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
@@ -292,6 +292,7 @@ export default function CompetitionCodesScreen() {
   const joinAnimation = useRef(new Animated.Value(0)).current;
   const createAnimation = useRef(new Animated.Value(0)).current;
   const [hasInitialized, setHasInitialized] = useState(false);
+  const hasAnimatedRef = useRef(false);
 
   const startAnimations = React.useCallback(() => {
     joinAnimation.setValue(0);
@@ -316,15 +317,11 @@ export default function CompetitionCodesScreen() {
     }, staggerDelay);
   }, [createAnimation, joinAnimation]);
 
-  useEffect(() => {
-    const timer = setTimeout(startAnimations, 100);
-    return () => clearTimeout(timer);
-  }, [startAnimations]);
-
   useFocusEffect(
     React.useCallback(() => {
-      setHasInitialized(false);
-      const timer = setTimeout(startAnimations, 50);
+      if (hasAnimatedRef.current) return;
+      hasAnimatedRef.current = true;
+      const timer = setTimeout(startAnimations, 100);
       return () => clearTimeout(timer);
     }, [startAnimations])
   );

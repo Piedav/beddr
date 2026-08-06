@@ -4,29 +4,29 @@ import {
   Image as SkiaImage,
   useImage,
 } from '@shopify/react-native-skia';
-import { useEffect, useMemo, useState } from 'react';
-import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, StyleProp, StyleSheet, ViewStyle } from 'react-native';
 
 const SLEEPING_FRAME_SOURCES = [
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-01.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-02.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-03.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-04.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-05.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-06.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-07.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-08.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-09.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-10.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-11.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-12.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-13.png'),
-  require('../assets/companions/slime/sleeping/slime-bounce-eyes-closed-14.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-01.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-02.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-03.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-04.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-05.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-06.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-07.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-08.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-09.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-10.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-11.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-12.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-13.png'),
+  require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-14.png'),
 ];
 
 const SLEEPING_FRAME_DURATION_MS = 1000 / 6;
 
-type SlimeCompanionProps = {
+type BlobCompanionProps = {
   hue?: number;
   size?: number;
   style?: StyleProp<ViewStyle>;
@@ -61,11 +61,11 @@ function createHueRotationMatrix(degrees: number) {
   ];
 }
 
-export function SlimeCompanion({
+export function BlobCompanion({
   hue = 0,
   size = 340,
   style,
-}: SlimeCompanionProps) {
+}: BlobCompanionProps) {
   const [frameIndex, setFrameIndex] = useState(0);
   const frames = [
     useImage(SLEEPING_FRAME_SOURCES[0]),
@@ -85,6 +85,22 @@ export function SlimeCompanion({
   ];
   const hueMatrix = useMemo(() => createHueRotationMatrix(hue), [hue]);
 
+  const loadAnimation = useRef(new Animated.Value(0)).current;
+  const hasLoadedOnceRef = useRef(false);
+  const loadedFrameCount = frames.filter(Boolean).length;
+
+  useEffect(() => {
+    if (hasLoadedOnceRef.current) return;
+    if (loadedFrameCount === 0) return;
+
+    hasLoadedOnceRef.current = true;
+    Animated.timing(loadAnimation, {
+      toValue: 1,
+      duration: 400,
+      useNativeDriver: true,
+    }).start();
+  }, [loadAnimation, loadedFrameCount]);
+
   useEffect(() => {
     const frameTimer = setInterval(() => {
       setFrameIndex((currentFrame) =>
@@ -96,10 +112,25 @@ export function SlimeCompanion({
   }, []);
 
   return (
-    <View
-      accessibilityLabel="Sleeping slime companion"
+    <Animated.View
+      accessibilityLabel="Sleeping blob companion"
       accessibilityRole="image"
-      style={[styles.container, { height: size, maxWidth: size }, style]}
+      style={[
+        styles.container,
+        { height: size, maxWidth: size },
+        style,
+        {
+          opacity: loadAnimation,
+          transform: [
+            {
+              translateY: loadAnimation.interpolate({
+                inputRange: [0, 1],
+                outputRange: [16, 0],
+              }),
+            },
+          ],
+        },
+      ]}
     >
       <Canvas style={styles.image}>
         {frames[frameIndex] && (
@@ -115,7 +146,7 @@ export function SlimeCompanion({
           </SkiaImage>
         )}
       </Canvas>
-    </View>
+    </Animated.View>
   );
 }
 

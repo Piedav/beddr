@@ -136,6 +136,7 @@ export default function CompetitionScreen() {
   const [isJoining, setIsJoining] = useState<string | null>(null);
   const [collapseFinished, setCollapseFinished] = useState(true);
   const [hasInitialized, setHasInitialized] = useState(false);
+  const hasAnimatedRef = useRef(false);
 
   const titleAnimation = useRef(new Animated.Value(0)).current;
   const statusAnimation = useRef(new Animated.Value(0)).current;
@@ -193,6 +194,8 @@ export default function CompetitionScreen() {
   });
 
   useEffect(() => {
+    hasAnimatedRef.current = false;
+
     if (!competitionId) {
       setCompetition(null);
       setLoadedCompetitionId(null);
@@ -320,16 +323,11 @@ export default function CompetitionScreen() {
       unsubscribers.forEach((unsub) => unsub());
     };
   }, [competition?.players]);
-  useEffect(() => {
-    if (!loading) {
-      startAnimations();
-    }
-  }, [loading, startAnimations]);
-
   useFocusEffect(
     React.useCallback(() => {
+      if (hasAnimatedRef.current) return;
       if (!loading) {
-        setHasInitialized(false);
+        hasAnimatedRef.current = true;
         startAnimations();
       }
     }, [loading, startAnimations])

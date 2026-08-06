@@ -58,6 +58,7 @@ const BeddrScreenTime = NativeModules.BeddrScreenTime as
 
 interface UserProfile {
   name: string;
+  companionHue?: number;
   lockedEvents: [];
   pastcomps: Array<{
     date: string;
@@ -965,7 +966,10 @@ export default function HomeScreen() {
                       </View>
                     </View>
                   )}
-                  <SlimeCompanion style={styles.companion} />
+                  <SlimeCompanion
+                    hue={userProfile?.companionHue ?? 0}
+                    style={styles.companion}
+                  />
                 </View>
 
         {/* This is the button that toggles giving points and whanot*/}

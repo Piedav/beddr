@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Slider from '@react-native-community/slider';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { deleteUser, updateProfile } from 'firebase/auth';
@@ -28,6 +29,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { SlimeCompanion } from '../components/SlimeCompanion';
 import { auth, firestore } from '../firebase';
 import { useUser } from './_layout';
 
@@ -56,6 +58,7 @@ const BeddrScreenTime = NativeModules.BeddrScreenTime as
 
 interface UserProfile {
   name?: string;
+  companionHue?: number;
   totalLockedMinutes?: number;
   thisWeekLockedMinutes?: number;
   lockedEvents?: LockedEvent[];
@@ -332,6 +335,9 @@ export default function ProfileScreen() {
   const [blockedSelectionSummary, setBlockedSelectionSummary] =
     useState<BlockedSelectionSummary | null>(null);
   const [isPickingBlockedApps, setIsPickingBlockedApps] = useState(false);
+  const [companionHue, setCompanionHue] = useState(0);
+  const [isSavingCompanionHue, setIsSavingCompanionHue] = useState(false);
+  const isAdjustingCompanionHue = useRef(false);
 
   const titleAnimation = useRef(new Animated.Value(0)).current;
   const statsAnimation = useRef(new Animated.Value(0)).current;
@@ -362,6 +368,10 @@ export default function ProfileScreen() {
           const data = docSnapshot.data() as UserProfile;
           setUserProfile(data);
           setNameInput(data?.name || userData?.name || '');
+          if (!isAdjustingCompanionHue.current) {
+            const savedHue = data.companionHue ?? 0;
+            setCompanionHue(((savedHue % 360) + 360) % 360);
+          }
         } else {
           setUserProfile(null);
           setNameInput(userData?.name || '');
@@ -819,6 +829,29 @@ export default function ProfileScreen() {
       setIsPickingBlockedApps(false);
     }
   };
+
+  const saveCompanionHue = async (value: number) => {
+    const nextHue = Math.round(value);
+    const previousHue = userProfile?.companionHue ?? 0;
+
+    setCompanionHue(nextHue);
+    setIsSavingCompanionHue(true);
+
+    try {
+      if (!userData?.uid) return;
+      await updateDoc(doc(firestore, 'profiledb', userData.uid), {
+        companionHue: nextHue,
+      });
+    } catch (error) {
+      console.error('Failed to save companion hue:', error);
+      setCompanionHue(previousHue);
+      Alert.alert('Could not save color', 'Please try choosing the slime color again.');
+    } finally {
+      isAdjustingCompanionHue.current = false;
+      setIsSavingCompanionHue(false);
+    }
+  };
+
   if (isLoadingProfile || isLoadingCompetitions || !userData) {
     return (
       <SafeAreaView style={styles.container}>
@@ -954,6 +987,41 @@ export default function ProfileScreen() {
                   <View style={styles.lockMetric}>
                     <Text style={styles.lockMetricValue}>{weeklyLockedText}</Text>
                     <Text style={styles.lockMetricLabel}>This week</Text>
+                  </View>
+                </View>
+
+                <View style={[styles.companionColorSection, { flex: 1, minWidth: 0 }]}>
+                  <SlimeCompanion hue={companionHue} size={128} />
+
+                  <View style={styles.companionColorControls}>
+                    <View style={styles.companionColorHeader}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.companionColorTitle}>Blob color</Text>
+                        <Text style={styles.companionColorSubtitle}>
+                          Drag to choose your companion&apos;s hue.
+                        </Text>
+                      </View>
+                      <Text style={styles.companionHueValue}>
+                        {`${Math.round(companionHue)}°`}
+                      </Text>
+                    </View>
+
+                    <Slider
+                      accessibilityLabel="Slime color hue"
+                      maximumTrackTintColor="rgba(255,255,255,0.18)"
+                      maximumValue={359}
+                      minimumTrackTintColor={strongColor}
+                      minimumValue={0}
+                      onSlidingComplete={saveCompanionHue}
+                      onSlidingStart={() => {
+                        isAdjustingCompanionHue.current = true;
+                      }}
+                      onValueChange={setCompanionHue}
+                      step={1}
+                      style={styles.companionHueSlider}
+                      thumbTintColor={`hsl(${companionHue}, 82%, 66%)`}
+                      value={companionHue}
+                    />
                   </View>
                 </View>
               </Animated.View>
@@ -1511,6 +1579,50 @@ const styles = StyleSheet.create({
   lockSummaryGrid: {
     flexDirection: 'row',
     alignItems: 'stretch',
+  },
+  companionColorSection: {
+    alignItems: 'center',
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+    paddingTop: 12,
+  },
+  companionColorControls: {
+    flex: 1,
+    minWidth: 0,
+  },
+  companionColorHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  companionColorTitle: {
+    color: '#FFFFFF',
+    fontFamily: defFontType,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  companionColorSubtitle: {
+    color: '#B0B0B0',
+    fontFamily: defFontType,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 3,
+  },
+  companionHueValue: {
+    color: strongColor,
+    fontFamily: defFontType,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  companionHueSlider: {
+    height: 40,
+    marginHorizontal: -4,
+    marginTop: 4,
+    width: '100%',
   },
   lockMetric: {
     flex: 1,

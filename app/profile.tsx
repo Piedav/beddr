@@ -9,8 +9,11 @@ import {
   collection,
   deleteField,
   doc,
+  getDocs,
   onSnapshot,
+  query,
   updateDoc,
+  where,
   writeBatch
 } from 'firebase/firestore';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -23,6 +26,7 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -62,6 +66,11 @@ interface UserProfile {
   totalLockedMinutes?: number;
   thisWeekLockedMinutes?: number;
   lockedEvents?: LockedEvent[];
+  shareOnlineStatus?: boolean;
+  acceptingInvites?: boolean;
+  searchable?: boolean;
+  friendCode?: string;
+  activeLockSessionId?: string | null;
 }
 
 type WinType = 'number' | 'percentage' | 'team';
@@ -338,6 +347,9 @@ export default function ProfileScreen() {
   const [companionHue, setCompanionHue] = useState(0);
   const [isSavingCompanionHue, setIsSavingCompanionHue] = useState(false);
   const isAdjustingCompanionHue = useRef(false);
+  const [shareOnlineStatus, setShareOnlineStatus] = useState(true);
+  const [acceptingInvites, setAcceptingInvites] = useState(true);
+  const [searchable, setSearchable] = useState(true);
 
   const titleAnimation = useRef(new Animated.Value(0)).current;
   const statsAnimation = useRef(new Animated.Value(0)).current;
@@ -372,6 +384,9 @@ export default function ProfileScreen() {
             const savedHue = data.companionHue ?? 0;
             setCompanionHue(((savedHue % 360) + 360) % 360);
           }
+          setShareOnlineStatus(data.shareOnlineStatus ?? true);
+          setAcceptingInvites(data.acceptingInvites ?? true);
+          setSearchable(data.searchable ?? true);
         } else {
           setUserProfile(null);
           setNameInput(userData?.name || '');
@@ -687,6 +702,7 @@ export default function ProfileScreen() {
 
       queueNameUpdate(doc(firestore, 'profiledb', uid), {
         name: trimmed,
+        nameLower: trimmed.toLowerCase(),
       });
 
       competitions.forEach((competition) => {
@@ -696,6 +712,40 @@ export default function ProfileScreen() {
           [`players.${uid}.name`]: trimmed,
         });
       });
+
+      // Also keep the denormalized name copies in sync — otherwise a
+      // pending friend request/lock invite you sent, or the group session
+      // you're currently in, keeps showing your old name to the recipient.
+      const [pendingFriendRequests, pendingLockInvites] = await Promise.all([
+        getDocs(
+          query(
+            collection(firestore, 'friendRequests'),
+            where('fromUid', '==', uid),
+            where('status', '==', 'pending')
+          )
+        ),
+        getDocs(
+          query(
+            collection(firestore, 'lockInvites'),
+            where('fromUid', '==', uid),
+            where('status', '==', 'pending')
+          )
+        ),
+      ]);
+
+      pendingFriendRequests.forEach((docSnap) => {
+        queueNameUpdate(docSnap.ref, { fromName: trimmed });
+      });
+
+      pendingLockInvites.forEach((docSnap) => {
+        queueNameUpdate(docSnap.ref, { fromName: trimmed });
+      });
+
+      if (userProfile?.activeLockSessionId) {
+        queueNameUpdate(doc(firestore, 'lockSessions', userProfile.activeLockSessionId), {
+          [`members.${uid}.name`]: trimmed,
+        });
+      }
 
       if (batchWriteCount > 0) {
         pendingCommits.push(nameUpdateBatch.commit());
@@ -750,6 +800,13 @@ export default function ProfileScreen() {
               const uid = userData.uid;
               setUserProfile(null);
               setCompetitions([]);
+
+              const [outgoingRequests, incomingRequests, friendshipDocs] = await Promise.all([
+                getDocs(query(collection(firestore, 'friendRequests'), where('fromUid', '==', uid))),
+                getDocs(query(collection(firestore, 'friendRequests'), where('toUid', '==', uid))),
+                getDocs(query(collection(firestore, 'friendships'), where('uids', 'array-contains', uid))),
+              ]);
+
               const batch = writeBatch(firestore);
 
               competitions.forEach((comp) => {
@@ -759,6 +816,18 @@ export default function ProfileScreen() {
                   });
                 }
               });
+
+              // Clean up friend data so it doesn't linger as an orphaned
+              // reference — an unclaimable friend code, stale pending
+              // requests, and this user showing up forever as a generic
+              // "Friend" in former friends' lists.
+              outgoingRequests.forEach((docSnap) => batch.delete(docSnap.ref));
+              incomingRequests.forEach((docSnap) => batch.delete(docSnap.ref));
+              friendshipDocs.forEach((docSnap) => batch.delete(docSnap.ref));
+
+              if (userProfile?.friendCode) {
+                batch.delete(doc(firestore, 'friendCodes', userProfile.friendCode));
+              }
 
               batch.delete(doc(firestore, 'profiledb', uid));
 
@@ -835,6 +904,57 @@ export default function ProfileScreen() {
     } finally {
       isAdjustingCompanionHue.current = false;
       setIsSavingCompanionHue(false);
+    }
+  };
+
+  const updateShareOnlineStatus = async (value: boolean) => {
+    const previous = shareOnlineStatus;
+    setShareOnlineStatus(value);
+
+    if (!userData?.uid) return;
+
+    try {
+      await updateDoc(doc(firestore, 'profiledb', userData.uid), {
+        shareOnlineStatus: value,
+      });
+    } catch (error) {
+      console.error('Failed to update share online status:', error);
+      setShareOnlineStatus(previous);
+      Alert.alert('Error', 'Could not update this setting. Please try again.');
+    }
+  };
+
+  const updateAcceptingInvites = async (value: boolean) => {
+    const previous = acceptingInvites;
+    setAcceptingInvites(value);
+
+    if (!userData?.uid) return;
+
+    try {
+      await updateDoc(doc(firestore, 'profiledb', userData.uid), {
+        acceptingInvites: value,
+      });
+    } catch (error) {
+      console.error('Failed to update accepting invites:', error);
+      setAcceptingInvites(previous);
+      Alert.alert('Error', 'Could not update this setting. Please try again.');
+    }
+  };
+
+  const updateSearchable = async (value: boolean) => {
+    const previous = searchable;
+    setSearchable(value);
+
+    if (!userData?.uid) return;
+
+    try {
+      await updateDoc(doc(firestore, 'profiledb', userData.uid), {
+        searchable: value,
+      });
+    } catch (error) {
+      console.error('Failed to update searchable status:', error);
+      setSearchable(previous);
+      Alert.alert('Error', 'Could not update this setting. Please try again.');
     }
   };
 
@@ -1059,6 +1179,58 @@ export default function ProfileScreen() {
                     {isPickingBlockedApps ? 'Opening Picker...' : 'Choose Apps to Block'}
                   </Text>
                 </TouchableOpacity>
+              </Animated.View>
+
+              <Animated.View style={[getAnimatedStyle(statsAnimation), styles.privacyCard]}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Friends &amp; Privacy</Text>
+                </View>
+
+                <View style={styles.privacyRow}>
+                  <View style={styles.privacyRowCopy}>
+                    <Text style={styles.privacyRowTitle}>Share online status</Text>
+                    <Text style={styles.privacyRowSubtitle}>
+                      Let friends see when you&apos;re active in Beddr.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={shareOnlineStatus}
+                    onValueChange={updateShareOnlineStatus}
+                    trackColor={{ false: '#3A3A3C', true: strongColor }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+
+                <View style={styles.privacyRow}>
+                  <View style={styles.privacyRowCopy}>
+                    <Text style={styles.privacyRowTitle}>Accepting invites</Text>
+                    <Text style={styles.privacyRowSubtitle}>
+                      Allow friends to invite you to lock in together.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={acceptingInvites}
+                    onValueChange={updateAcceptingInvites}
+                    trackColor={{ false: '#3A3A3C', true: strongColor }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+
+                <View style={[styles.privacyRow, styles.privacyRowLast]}>
+                  <View style={styles.privacyRowCopy}>
+                    <Text style={styles.privacyRowTitle}>Show up in friend search</Text>
+                    <Text style={styles.privacyRowSubtitle}>
+                      Let others find you by searching your name. Friend codes always work
+                      regardless of this setting.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={searchable}
+                    onValueChange={updateSearchable}
+                    trackColor={{ false: '#3A3A3C', true: strongColor }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
               </Animated.View>
 
               <Animated.View style={getAnimatedStyle(statsAnimation)}>
@@ -1534,6 +1706,41 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     fontFamily: defFontType,
+  },
+  privacyCard: {
+    backgroundColor: lbgColor,
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 22,
+  },
+  privacyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+    gap: 14,
+  },
+  privacyRowLast: {
+    borderBottomWidth: 0,
+    paddingBottom: 0,
+  },
+  privacyRowCopy: {
+    flex: 1,
+  },
+  privacyRowTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: defFontType,
+    marginBottom: 3,
+  },
+  privacyRowSubtitle: {
+    color: '#B0B0B0',
+    fontSize: 12,
+    fontFamily: defFontType,
+    lineHeight: 16,
   },
   sectionHeader: {
     flexDirection: 'row',

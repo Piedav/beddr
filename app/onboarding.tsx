@@ -123,29 +123,41 @@ export default function OnboardingScreen({
               email: data.email || existingUser.email,
             };
           } else {
+            // Only ever write identity fields here, never lockedEvents/
+            // competitions/etc. Every consumer of those already falls back
+            // safely when they're missing (see getAllTimeLockedMinutes,
+            // calculateStats, and recordEvent's own updateDoc->setDoc
+            // fallback in index.tsx). Explicitly resetting them to empty
+            // defaults here is what turns a false "doesn't exist" read
+            // (e.g. from a getDoc racing a fast sign-out/sign-in sequence)
+            // into real, destructive data loss on an account that actually
+            // has history — this write is safe/idempotent either way now.
+            const initialName = existingUser.name || 'User';
             await setDoc(
               userDocRef,
               {
-                name: existingUser.name || 'User',
+                name: initialName,
+                nameLower: initialName.toLowerCase(),
                 email: existingUser.email,
-                competitions: [],
-                lockedEvents: [],
-                totalLockedMinutes: 0,
-                thisWeekLockedMinutes: 0,
+                searchable: true,
               },
               { merge: true }
             );
 
             finalUser = {
               ...existingUser,
-              name: existingUser.name || 'User',
+              name: initialName,
             };
           }
 
           setExistingSignedInUser(finalUser);
 
           setUser((prev) => {
-            if (prev && prev.name && prev.name !== 'User') {
+            // Only keep the previous name if it's for the SAME account —
+            // otherwise switching accounts (e.g. testing with a second
+            // test account) could keep displaying the old account's name
+            // over the newly signed-in one.
+            if (prev && prev.uid === finalUser.uid && prev.name && prev.name !== 'User') {
               return prev;
             }
             return finalUser;
@@ -172,17 +184,22 @@ export default function OnboardingScreen({
       setIsCreatingProfile(true);
 
       const userDocRef = doc(firestore, 'profiledb', userData.uid);
-      const userDoc = await getDoc(userDocRef);
 
+      // Identity fields only — see the comment in the onAuthStateChanged
+      // listener above for why lockedEvents/competitions/etc. are never
+      // explicitly written (or reset) here.
+      // Note: `searchable` is deliberately not written here — this call
+      // isn't scoped to "doc doesn't exist yet" the way the listener above
+      // is, so unconditionally writing it could reset a returning user's
+      // own privacy choice back to the default. New users get it from the
+      // listener's else-branch; existing users missing it get backfilled
+      // once from index.tsx's profile snapshot handler.
       await setDoc(
         userDocRef,
         {
           name: userData.name,
+          nameLower: userData.name.toLowerCase(),
           email: userData.email,
-          competitions: userDoc.exists() ? userDoc.data().competitions ?? [] : [],
-          lockedEvents: userDoc.exists() ? userDoc.data().lockedEvents ?? [] : [],
-          totalLockedMinutes: userDoc.exists() ? userDoc.data().totalLockedMinutes ?? 0 : 0,
-          thisWeekLockedMinutes: userDoc.exists() ? userDoc.data().thisWeekLockedMinutes ?? 0 : 0,
         },
         { merge: true }
       );
@@ -238,26 +255,30 @@ export default function OnboardingScreen({
 
       const userDocRef = doc(firestore, 'profiledb', signedInUser.uid);
       const userDoc = await getDoc(userDocRef);
+      const existingData = userDoc.exists() ? userDoc.data() : null;
 
-      if (userDoc.exists()) {
-        await setDoc(
-          userDocRef,
-          {
-            name: signedInUser.name !== 'User' ? signedInUser.name : userDoc.data().name,
-            email: signedInUser.email || userDoc.data().email,
-          },
-          { merge: true }
-        );
-      } else {
-        await setDoc(userDocRef, {
-          name: signedInUser.name,
-          email: signedInUser.email,
-          competitions: [],
-          lockedEvents: [],
-          totalLockedMinutes: 0,
-          thisWeekLockedMinutes: 0,
-        });
-      }
+      // Identity fields only — see the comment in the onAuthStateChanged
+      // listener above for why lockedEvents/competitions/etc. are never
+      // written (or reset) here. Apple only returns the user's real name on
+      // their very first-ever sign-in, so on later sign-ins we keep
+      // whatever name is already stored instead of overwriting it with the
+      // generic 'User' fallback.
+      const resolvedName =
+        signedInUser.name !== 'User' ? signedInUser.name : existingData?.name || signedInUser.name;
+
+      await setDoc(
+        userDocRef,
+        {
+          name: resolvedName,
+          nameLower: resolvedName.toLowerCase(),
+          email: signedInUser.email || existingData?.email || signedInUser.email,
+          // Only set a default on first-ever sign-in — existingData is null
+          // exactly when this doc doesn't exist yet. Never overwrite a
+          // returning user's own privacy choice.
+          ...(existingData ? {} : { searchable: true }),
+        },
+        { merge: true }
+      );
 
       setUser(signedInUser);
       setExistingSignedInUser(signedInUser);

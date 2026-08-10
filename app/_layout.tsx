@@ -1,12 +1,16 @@
 import { Ionicons } from '@expo/vector-icons'; //icons
 import AsyncStorage from '@react-native-async-storage/async-storage'; //storage on the device
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useFonts } from "expo-font";
 import { Tabs } from 'expo-router'; //this is for the tab bar at the bottom :)
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from 'expo-status-bar'; //status of bar style and whatnot
+import { signOut } from 'firebase/auth';
 import React, { createContext, useContext, useEffect, useState } from 'react'; //shares data across the oteher files
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { LockInviteBanner } from '../components/LockInviteBanner';
+import { auth } from '../firebase';
 import OnboardingScreen from './onboarding'; //yeah
 
 
@@ -37,12 +41,12 @@ const UserContext = createContext<{ //creates a thing for the user
 const LockControlContext = createContext<{
   isLockedIn: boolean;
   setIsLockedIn: (locked: boolean) => void;
-  toggleLockIn: () => Promise<void>;
-  registerLockToggle: (handler: (() => Promise<void>) | null) => void;
+  toggleLockIn: () => Promise<boolean>;
+  registerLockToggle: (handler: (() => Promise<boolean>) | null) => void;
 }>({
   isLockedIn: false,
   setIsLockedIn: () => {},
-  toggleLockIn: async () => {},
+  toggleLockIn: async () => false,
   registerLockToggle: () => {},
 });
 
@@ -237,7 +241,7 @@ export default function RootLayout() {
   const [isLoading, setIsLoading] = useState(true);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [isLockedIn, setIsLockedIn] = useState(false);
-  const [lockToggleHandler, setLockToggleHandler] = useState<(() => Promise<void>) | null>(null);
+  const [lockToggleHandler, setLockToggleHandler] = useState<(() => Promise<boolean>) | null>(null);
 
   const [fontsLoaded] = useFonts({
     Molengo: require("../assets/fonts/Molengo-Regular.ttf"),
@@ -247,6 +251,17 @@ export default function RootLayout() {
 
   useEffect(() => {
     SplashScreen.preventAutoHideAsync();
+  }, []);
+
+  useEffect(() => {
+    // Configured here (not just in onboarding) so GoogleSignin.signOut() in
+    // resetToOnboarding works even if OnboardingScreen never mounted this
+    // session (i.e. the user is logging out from an already-signed-in state).
+    GoogleSignin.configure({
+      iosClientId:
+        '188667592970-h4hmpdbimh2ghdv49srbcmoun8h670g7.apps.googleusercontent.com',
+      scopes: ['profile', 'email', 'openid'],
+    });
   }, []);
 
   useEffect(() => {
@@ -326,7 +341,19 @@ export default function RootLayout() {
   const resetToOnboarding = async () => {
     try {
       console.log('Starting app reset...');
-      
+
+      // Actually sign out of Firebase (and Google, if that's how the user
+      // signed in) so this is a real logout. Without this, Firebase Auth
+      // stays signed in behind the scenes, onboarding's "still signed in"
+      // gate screen shows up, and if the user then signs back in with a
+      // *different* provider than they originally used (Apple vs Google),
+      // Firebase silently creates a brand new account with an empty
+      // profile instead of returning to their existing one.
+      await signOut(auth).catch((err) =>
+        console.error('Error signing out of Firebase:', err)
+      );
+      await GoogleSignin.signOut().catch(() => {});
+
       // Clear all AsyncStorage data
       await AsyncStorage.clear();
       console.log('AsyncStorage cleared');
@@ -346,14 +373,15 @@ export default function RootLayout() {
     }
   };
 
-  const registerLockToggle = React.useCallback((handler: (() => Promise<void>) | null) => {
+  const registerLockToggle = React.useCallback((handler: (() => Promise<boolean>) | null) => {
     setLockToggleHandler(() => handler);
   }, []);
 
   const toggleLockIn = React.useCallback(async () => {
     if (lockToggleHandler) {
-      await lockToggleHandler();
+      return await lockToggleHandler();
     }
+    return false;
   }, [lockToggleHandler]);
 
   if (isLoading || !fontsLoaded) {
@@ -387,7 +415,15 @@ export default function RootLayout() {
       >
         <StatusBar style="light" backgroundColor="#000000" />
         {hasCompletedOnboarding ? (
-          <TabsLayout />
+          <>
+            <TabsLayout />
+            <LockInviteBanner
+              uid={userData?.uid ?? null}
+              myName={userData?.name ?? 'You'}
+              isLockedIn={isLockedIn}
+              triggerLockIn={toggleLockIn}
+            />
+          </>
         ) : (
           <OnboardingScreen onComplete={handleOnboardingComplete} />
         )}

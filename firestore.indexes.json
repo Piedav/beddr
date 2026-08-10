@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "profiledb",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "searchable", "order": "ASCENDING" },
+        { "fieldPath": "nameLower", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

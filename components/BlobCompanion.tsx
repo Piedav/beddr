@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import {
   Canvas,
   ColorMatrix,
@@ -26,10 +27,36 @@ const SLEEPING_FRAME_SOURCES = [
 
 const SLEEPING_FRAME_DURATION_MS = 1000 / 6;
 
+const SPARKLE_COLOR = '#FFE9A8';
+
+type SparkleSlot = {
+  angleDeg: number;
+  radiusRatio: number;
+  sizeRatio: number;
+  delayMs: number;
+};
+
+// Fixed, hand-placed positions around the blob's bounding circle (angle +
+// distance from center, both as ratios of size so they scale with it).
+// Revealed one at a time as sparkleLevel rises, rather than randomly
+// generated, so the layout is stable across re-renders.
+const SPARKLE_SLOTS: SparkleSlot[] = [
+  { angleDeg: 15, radiusRatio: 0.48, sizeRatio: 0.11, delayMs: 0 },
+  { angleDeg: 65, radiusRatio: 0.4, sizeRatio: 0.08, delayMs: 260 },
+  { angleDeg: 120, radiusRatio: 0.46, sizeRatio: 0.13, delayMs: 520 },
+  { angleDeg: 175, radiusRatio: 0.38, sizeRatio: 0.09, delayMs: 780 },
+  { angleDeg: 230, radiusRatio: 0.44, sizeRatio: 0.1, delayMs: 130 },
+  { angleDeg: 285, radiusRatio: 0.5, sizeRatio: 0.07, delayMs: 390 },
+  { angleDeg: 335, radiusRatio: 0.36, sizeRatio: 0.12, delayMs: 650 },
+  { angleDeg: 95, radiusRatio: 0.3, sizeRatio: 0.08, delayMs: 910 },
+];
+
 type BlobCompanionProps = {
   hue?: number;
   size?: number;
   style?: StyleProp<ViewStyle>;
+  /** 0 (no sparkles) to 1 (fully sparkly) — how close to today's focus goal. */
+  sparkleLevel?: number;
 };
 
 function createHueRotationMatrix(degrees: number) {
@@ -61,10 +88,100 @@ function createHueRotationMatrix(degrees: number) {
   ];
 }
 
+function Sparkle({
+  slot,
+  size,
+  active,
+}: {
+  slot: SparkleSlot;
+  size: number;
+  active: boolean;
+}) {
+  const twinkle = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!active) {
+      twinkle.stopAnimation();
+      twinkle.setValue(0);
+      return;
+    }
+
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.delay(slot.delayMs),
+        Animated.timing(twinkle, {
+          toValue: 1,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+        Animated.timing(twinkle, {
+          toValue: 0.35,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    loop.start();
+    return () => loop.stop();
+  }, [active, slot.delayMs, twinkle]);
+
+  if (!active) return null;
+
+  const radius = slot.radiusRatio * (size / 2);
+  const angleRad = (slot.angleDeg * Math.PI) / 180;
+  const sparkleSize = Math.max(8, size * slot.sizeRatio);
+  const left = size / 2 + radius * Math.cos(angleRad) - sparkleSize / 2;
+  const top = size / 2 + radius * Math.sin(angleRad) - sparkleSize / 2;
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.sparkle,
+        {
+          left,
+          top,
+          opacity: twinkle.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0.35, 1],
+          }),
+          transform: [
+            {
+              scale: twinkle.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.75, 1.1],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <Ionicons name="sparkles" size={sparkleSize} color={SPARKLE_COLOR} />
+    </Animated.View>
+  );
+}
+
+function CompanionSparkles({ level, size }: { level: number; size: number }) {
+  const clampedLevel = Math.max(0, Math.min(1, level));
+  const activeCount = Math.round(clampedLevel * SPARKLE_SLOTS.length);
+
+  if (activeCount === 0) return null;
+
+  return (
+    <>
+      {SPARKLE_SLOTS.map((slot, index) => (
+        <Sparkle key={index} slot={slot} size={size} active={index < activeCount} />
+      ))}
+    </>
+  );
+}
+
 export function BlobCompanion({
   hue = 0,
   size = 340,
   style,
+  sparkleLevel = 0,
 }: BlobCompanionProps) {
   const [frameIndex, setFrameIndex] = useState(0);
   const frames = [
@@ -146,6 +263,7 @@ export function BlobCompanion({
           </SkiaImage>
         )}
       </Canvas>
+      <CompanionSparkles level={sparkleLevel} size={size} />
     </Animated.View>
   );
 }
@@ -158,5 +276,8 @@ const styles = StyleSheet.create({
   image: {
     height: '100%',
     width: '100%',
+  },
+  sparkle: {
+    position: 'absolute',
   },
 });

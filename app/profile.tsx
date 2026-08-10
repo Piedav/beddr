@@ -69,6 +69,7 @@ interface UserProfile {
   shareOnlineStatus?: boolean;
   acceptingInvites?: boolean;
   searchable?: boolean;
+  shareSparkleLevel?: boolean;
   friendCode?: string;
   activeLockSessionId?: string | null;
 }
@@ -350,6 +351,7 @@ export default function ProfileScreen() {
   const [shareOnlineStatus, setShareOnlineStatus] = useState(true);
   const [acceptingInvites, setAcceptingInvites] = useState(true);
   const [searchable, setSearchable] = useState(true);
+  const [shareSparkleLevel, setShareSparkleLevel] = useState(true);
 
   const titleAnimation = useRef(new Animated.Value(0)).current;
   const statsAnimation = useRef(new Animated.Value(0)).current;
@@ -387,6 +389,7 @@ export default function ProfileScreen() {
           setShareOnlineStatus(data.shareOnlineStatus ?? true);
           setAcceptingInvites(data.acceptingInvites ?? true);
           setSearchable(data.searchable ?? true);
+          setShareSparkleLevel(data.shareSparkleLevel ?? true);
         } else {
           setUserProfile(null);
           setNameInput(userData?.name || '');
@@ -958,6 +961,23 @@ export default function ProfileScreen() {
     }
   };
 
+  const updateShareSparkleLevel = async (value: boolean) => {
+    const previous = shareSparkleLevel;
+    setShareSparkleLevel(value);
+
+    if (!userData?.uid) return;
+
+    try {
+      await updateDoc(doc(firestore, 'profiledb', userData.uid), {
+        shareSparkleLevel: value,
+      });
+    } catch (error) {
+      console.error('Failed to update share sparkle level:', error);
+      setShareSparkleLevel(previous);
+      Alert.alert('Error', 'Could not update this setting. Please try again.');
+    }
+  };
+
   if (isLoadingProfile || isLoadingCompetitions || !userData) {
     return (
       <SafeAreaView style={styles.container}>
@@ -1216,7 +1236,7 @@ export default function ProfileScreen() {
                   />
                 </View>
 
-                <View style={[styles.privacyRow, styles.privacyRowLast]}>
+                <View style={styles.privacyRow}>
                   <View style={styles.privacyRowCopy}>
                     <Text style={styles.privacyRowTitle}>Show up in friend search</Text>
                     <Text style={styles.privacyRowSubtitle}>
@@ -1227,6 +1247,22 @@ export default function ProfileScreen() {
                   <Switch
                     value={searchable}
                     onValueChange={updateSearchable}
+                    trackColor={{ false: '#3A3A3C', true: strongColor }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+
+                <View style={[styles.privacyRow, styles.privacyRowLast]}>
+                  <View style={styles.privacyRowCopy}>
+                    <Text style={styles.privacyRowTitle}>Share sparkle level</Text>
+                    <Text style={styles.privacyRowSubtitle}>
+                      Let friends see how sparkly your companion is when you&apos;re locked in
+                      together.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={shareSparkleLevel}
+                    onValueChange={updateShareSparkleLevel}
                     trackColor={{ false: '#3A3A3C', true: strongColor }}
                     thumbColor="#FFFFFF"
                   />

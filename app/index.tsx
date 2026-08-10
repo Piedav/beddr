@@ -130,6 +130,8 @@ interface UserProfile {
   nameLower?: string;
   searchable?: boolean;
   starredFriends?: string[];
+  sparkleLevel?: number;
+  shareSparkleLevel?: boolean;
 }
 
 type FriendRequest = {
@@ -336,7 +338,7 @@ function getTodayLockedMinutes(
   return getLockedMinutesInRange(events, getStartOfDayMs(new Date(nowMs)), nowMs, nowMs);
 }
 
-const SPARKLE_FULL_HOURS = 6;
+const SPARKLE_FULL_HOURS = 12;
 
 function getSparkleLevel(events?: LockedEvent[], nowMs: number = Date.now()): number {
   const todayMinutes = getTodayLockedMinutes(events, nowMs);
@@ -369,7 +371,10 @@ export default function HomeScreen() {
   const [invitingFriendUid, setInvitingFriendUid] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<LockSession | null>(null);
   const [sessionMemberProfiles, setSessionMemberProfiles] = useState<
-    Record<string, { name: string; companionHue: number }>
+    Record<
+      string,
+      { name: string; companionHue: number; sparkleLevel: number; shareSparkleLevel: boolean }
+    >
   >({});
   const [groupCompanionGridWidth, setGroupCompanionGridWidth] = useState(0);
   const [isLeavingGroup, setIsLeavingGroup] = useState(false);
@@ -389,6 +394,8 @@ export default function HomeScreen() {
   const [lockedEvents, setLockedEvents] = useState<LockedEvent[]>([]);
   const [nowMs, setNowMs] = useState(Date.now());
   const [unlockedHeaderHeight, setUnlockedHeaderHeight] = useState(0);
+  const [statsRowHeight, setStatsRowHeight] = useState(0);
+  const sparkleLevelWriteRef = useRef<number | null>(null);
   const [welcomeNeedsBreak, setWelcomeNeedsBreak] = useState(false);
 
 
@@ -403,7 +410,7 @@ export default function HomeScreen() {
     setTodayLockedMinutes(today);
   }, [lockedEvents, nowMs]);
 
-  
+
   const [stats, setStats] = useState<{
     totalWins: number;
     averageBedtime: string;
@@ -676,6 +683,24 @@ export default function HomeScreen() {
     };
   }, [uid]);
 
+  // Push our own sparkle level to profiledb so friends can see it during a
+  // group session — rounded to eighths (matching CompanionSparkles' own
+  // 8-slot reveal granularity) so this only writes when the visible sparkle
+  // count would actually change, not on every second's tick while locked in.
+  useEffect(() => {
+    if (!uid) return;
+
+    const level = getSparkleLevel(lockedEvents, nowMs);
+    const rounded = Math.round(level * 8) / 8;
+
+    if (sparkleLevelWriteRef.current === rounded) return;
+    sparkleLevelWriteRef.current = rounded;
+
+    updateDoc(doc(firestore, 'profiledb', uid), { sparkleLevel: rounded }).catch((err) =>
+      console.error('Failed to update sparkle level:', err)
+    );
+  }, [uid, lockedEvents, nowMs]);
+
   // useEffect(() => {
   //   const unsub = onAuthStateChanged(auth, (user) => {
   //     setUid(user?.uid ?? null);
@@ -793,6 +818,9 @@ export default function HomeScreen() {
           }
           if (profileData?.searchable === undefined) {
             backfill.searchable = true;
+          }
+          if (profileData?.shareSparkleLevel === undefined) {
+            backfill.shareSparkleLevel = true;
           }
           if (Object.keys(backfill).length > 0) {
             updateDoc(userDocRef, backfill).catch((err) =>
@@ -1011,6 +1039,8 @@ export default function HomeScreen() {
             [memberUid]: {
               name: data?.name?.trim() || 'Friend',
               companionHue: data?.companionHue ?? 0,
+              sparkleLevel: data?.sparkleLevel ?? 0,
+              shareSparkleLevel: data?.shareSparkleLevel ?? true,
             },
           }));
         },
@@ -1433,14 +1463,78 @@ export default function HomeScreen() {
                         <Text style={styles.statusText}>You&apos;re currently in a competition!</Text>
                       </Animated.View>
                     )}
+                  </View>
+                  ) : (
+                    <View
+                      style={[
+                        styles.lockedInContainer,
+                        // minHeight, not height: this is a target to match,
+                        // not a hard cap. If the clock's actual rendered
+                        // size on a given device/screen ever exceeds the
+                        // measured unlockedHeaderHeight, a fixed height
+                        // would force it into a box too small to hold it —
+                        // centered content in an undersized fixed-height box
+                        // can end up rendered outside the visible bounds
+                        // entirely rather than just looking cramped.
+                        unlockedHeaderHeight > 0 && { minHeight: unlockedHeaderHeight },
+                      ]}
+                    >
+                      <Text style={styles.lockClockText}>
+                        {formatClockTime(new Date(nowMs))}
+                      </Text>
+                    </View>
+                  )}
 
+                  {theButtonPressed && (
+                    <View
+                      style={[
+                        styles.lockedInRow,
+                        statsRowHeight > 0 && { minHeight: statsRowHeight },
+                      ]}
+                    >
+                      <View style={styles.lockedInStatBox}>
+                        <Text
+                          style={styles.lockedInStatNumber}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.4}
+                        >
+                          {formatMinutes(allTimeLockedMinutes)}
+                        </Text>
+                        <Text style={styles.lockedInStatLabel}>life time locked in</Text>
+                      </View>
+
+                      <View style={styles.lockedInInner}>
+                        <Text style={styles.lockedInLabel}>
+                          Locked in for
+                        </Text>
+
+                        <Text style={styles.lockedInTimerText}>
+                          {formatDurationWithSeconds(lockedInSeconds)}
+                        </Text>
+                      </View>
+
+                      <View style={styles.lockedInStatBox}>
+                        <Text
+                          style={styles.lockedInStatNumber}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.4}
+                        >
+                          {formatMinutes(todayLockedMinutes)}
+                        </Text>
+                        <Text style={styles.lockedInStatLabel}>today&apos;s time locked in</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {!theButtonPressed && (
                     <Animated.View style={getAnimatedStyle(progressAnimation)}>
-                      
-                      <View style = {[styles.row, styles.competitionContainer]}>
-                        {/* <Text style={styles.minutesText}>Lifetime locked in minutes: {formatMinutes(allTimeLockedMinutes)}</Text>
-                        <Text style={styles.minutesText}>This week locked in minutes: {formatMinutes(thisWeekLockedMinutes)}</Text>  */}
+                      <View
+                        style={[styles.row, styles.competitionContainer]}
+                        onLayout={(e) => setStatsRowHeight(e.nativeEvent.layout.height)}
+                      >
                         <View style={styles.competitionStatBox}>
-                          
                           <Text
                             style={styles.dataNumber}
                             numberOfLines={1}
@@ -1450,9 +1544,8 @@ export default function HomeScreen() {
                             {formatMinutes(allTimeLockedMinutes)}
                           </Text>
                           <Text style={styles.competitionStatLabel}>life time locked in</Text>
-                        </View>     
+                        </View>
                         <View style={styles.competitionStatBox}>
-
                           <Text
                             style={styles.dataNumber}
                             numberOfLines={1}
@@ -1464,7 +1557,6 @@ export default function HomeScreen() {
                           <Text style={styles.competitionStatLabel}>weekly time locked in</Text>
                         </View>
                         <View style={styles.competitionStatBox}>
-
                           <Text
                             style={styles.dataNumber}
                             numberOfLines={1}
@@ -1477,29 +1569,8 @@ export default function HomeScreen() {
                         </View>
                       </View>
                     </Animated.View>
-                  </View>
-                  ) : (
-                    <View
-                      style={[
-                        styles.lockedInContainer,
-                        unlockedHeaderHeight > 0 && { height: unlockedHeaderHeight },
-                      ]}
-                    >
-                      <View style={styles.lockedInInner}>
-                        <Text style={styles.lockClockText}>
-                          {formatClockTime(new Date(nowMs))}
-                        </Text>
-
-                        <Text style={styles.lockedInLabel}>
-                          Locked in for
-                        </Text>
-
-                        <Text style={styles.lockedInTimerText}>
-                          {formatDurationWithSeconds(lockedInSeconds)}
-                        </Text>
-                      </View>
-                    </View>
                   )}
+
                   {activeSession && Object.keys(activeSession.members).length > 1 ? (
                     (() => {
                       const memberEntries = Object.entries(activeSession.members);
@@ -1519,6 +1590,12 @@ export default function HomeScreen() {
                               const displayHue = liveProfile?.companionHue ?? member.companionHue;
                               const displayName =
                                 memberUid === uid ? 'You' : liveProfile?.name ?? member.name;
+                              const displaySparkleLevel =
+                                memberUid === uid
+                                  ? sparkleLevel
+                                  : liveProfile?.shareSparkleLevel !== false
+                                  ? liveProfile?.sparkleLevel ?? 0
+                                  : 0;
 
                               return (
                                 <View
@@ -1528,7 +1605,7 @@ export default function HomeScreen() {
                                   <BlobCompanion
                                     hue={displayHue}
                                     size={blobSize}
-                                    sparkleLevel={memberUid === uid ? sparkleLevel : 0}
+                                    sparkleLevel={displaySparkleLevel}
                                   />
                                   <Text
                                     style={[styles.groupCompanionName, { maxWidth: blobSize }]}
@@ -2241,6 +2318,8 @@ const styles = StyleSheet.create({
   lockedInContainer: {
     paddingVertical: 24,
     marginBottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   competitionsTitle: {
     fontFamily: defFontType,
@@ -2486,35 +2565,68 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexWrap: 'wrap',
   },
-  lockedInInner: {
+  lockedInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    // Height is forced to match the measured locked-out stats row (see
+    // statsRowHeight/onLayout above) rather than hand-tuned padding, so this
+    // stays correct automatically no matter what font sizes end up being on
+    // either row — alignItems: 'center' takes care of centering the
+    // content within whatever that measured height turns out to be.
+    marginBottom: 16,
+  },
+
+  lockedInStatBox: {
     flex: 1,
+    alignItems: 'center',
+  },
+
+  lockedInStatNumber: {
+    fontFamily: defFontType,
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+
+  lockedInStatLabel: {
+    fontFamily: defFontType,
+    fontSize: 12,
+    color: '#B0B0B0',
+    textAlign: 'center',
+  },
+
+  lockedInInner: {
+    flex: 1.6,
     justifyContent: 'center',
     alignItems: 'center',
   },
 
   lockClockText: {
     fontFamily: defFontType,
-    fontSize: 52,
+    fontSize: 48,
     fontWeight: '700',
     color: '#FFFFFF',
-    marginBottom: 16,
+    marginBottom: 5,
     textAlign: 'center',
   },
 
   lockedInLabel: {
     fontFamily: defFontType,
-    fontSize: 18,
+    fontSize: 20,
     color: '#B0B0B0',
-    marginBottom: 8,
+    marginBottom: 4,
     textAlign: 'center',
   },
 
   lockedInTimerText: {
     fontFamily: defFontType,
-    fontSize: 36,
+    fontSize: 45,
     fontWeight: '700',
     color: strongColor,
     textAlign: 'center',
   },
-  
+
 });

@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import {
   Canvas,
   ColorMatrix,
@@ -6,7 +5,9 @@ import {
   useImage,
 } from '@shopify/react-native-skia';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, StyleProp, StyleSheet, ViewStyle } from 'react-native';
+import { Animated, Image, StyleProp, StyleSheet, ViewStyle } from 'react-native';
+
+const SPARKLE_IMAGE_SOURCE = require('../assets/companions/sparkle.png');
 
 const SLEEPING_FRAME_SOURCES = [
   require('../assets/companions/blob/sleeping/blob-bounce-eyes-closed-01.png'),
@@ -27,8 +28,6 @@ const SLEEPING_FRAME_SOURCES = [
 
 const SLEEPING_FRAME_DURATION_MS = 1000 / 6;
 
-const SPARKLE_COLOR = '#FFE9A8';
-
 type SparkleSlot = {
   angleDeg: number;
   radiusRatio: number;
@@ -41,14 +40,14 @@ type SparkleSlot = {
 // Revealed one at a time as sparkleLevel rises, rather than randomly
 // generated, so the layout is stable across re-renders.
 const SPARKLE_SLOTS: SparkleSlot[] = [
-  { angleDeg: 15, radiusRatio: 0.48, sizeRatio: 0.11, delayMs: 0 },
-  { angleDeg: 65, radiusRatio: 0.4, sizeRatio: 0.08, delayMs: 260 },
-  { angleDeg: 120, radiusRatio: 0.46, sizeRatio: 0.13, delayMs: 520 },
-  { angleDeg: 175, radiusRatio: 0.38, sizeRatio: 0.09, delayMs: 780 },
-  { angleDeg: 230, radiusRatio: 0.44, sizeRatio: 0.1, delayMs: 130 },
-  { angleDeg: 285, radiusRatio: 0.5, sizeRatio: 0.07, delayMs: 390 },
-  { angleDeg: 335, radiusRatio: 0.36, sizeRatio: 0.12, delayMs: 650 },
-  { angleDeg: 95, radiusRatio: 0.3, sizeRatio: 0.08, delayMs: 910 },
+  { angleDeg: 355, radiusRatio: 0.58, sizeRatio: 0.11, delayMs: 0 },
+  { angleDeg: 130, radiusRatio: 0.5, sizeRatio: 0.08, delayMs: 260 },
+  { angleDeg: 220, radiusRatio: 0.46, sizeRatio: 0.13, delayMs: 520 },
+  { angleDeg: 55, radiusRatio: 0.48, sizeRatio: 0.09, delayMs: 780 },
+  { angleDeg: 300, radiusRatio: 0.34, sizeRatio: 0.1, delayMs: 130 },
+  { angleDeg: 195, radiusRatio: 0.22, sizeRatio: 0.07, delayMs: 390 },
+  { angleDeg: 170, radiusRatio: 0.66, sizeRatio: 0.07, delayMs: 650 },
+  { angleDeg: 25, radiusRatio: 0.7, sizeRatio: 0.08, delayMs: 910 },
 ];
 
 type BlobCompanionProps = {
@@ -157,7 +156,11 @@ function Sparkle({
         },
       ]}
     >
-      <Ionicons name="sparkles" size={sparkleSize} color={SPARKLE_COLOR} />
+      <Image
+        source={SPARKLE_IMAGE_SOURCE}
+        style={{ width: sparkleSize, height: sparkleSize }}
+        resizeMode="contain"
+      />
     </Animated.View>
   );
 }

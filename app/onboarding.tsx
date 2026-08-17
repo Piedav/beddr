@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import Slider from '@react-native-community/slider';
 import {
   GoogleSignin,
   statusCodes,
@@ -19,6 +20,7 @@ import {
   Alert,
   Animated,
   KeyboardAvoidingView,
+  NativeModules,
   Platform,
   ScrollView,
   StyleSheet,
@@ -27,6 +29,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BlobCompanion } from '../components/BlobCompanion';
 import { auth, firestore } from '../firebase';
 
 const dbgColor = "#0a0513ff";
@@ -34,6 +37,22 @@ const bgColor = "#111124ff";
 const lbgColor = "#322f4e81";
 const strongColor = "#cc7bdbff";
 const defFontType = "OpenSansSemiBold";
+
+type BlockedSelectionSummary = {
+  isAvailable: boolean;
+  selectedApps: number;
+  selectedCategories: number;
+  selectedWebDomains: number;
+};
+
+type BeddrScreenTimeModule = {
+  getBlockedSelectionSummary: () => Promise<BlockedSelectionSummary>;
+  requestAuthorizationAndSelectApps: () => Promise<BlockedSelectionSummary>;
+};
+
+const BeddrScreenTime = NativeModules.BeddrScreenTime as
+  | BeddrScreenTimeModule
+  | undefined;
 
 interface OnboardingStep {
   id: number;
@@ -59,6 +78,10 @@ export default function OnboardingScreen({
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isCreatingProfile, setIsCreatingProfile] = useState(false);
   const [isCheckingExistingAuth, setIsCheckingExistingAuth] = useState(true);
+  const [companionHue, setCompanionHue] = useState(260);
+  const [blockedSelectionSummary, setBlockedSelectionSummary] =
+    useState<BlockedSelectionSummary | null>(null);
+  const [isPickingBlockedApps, setIsPickingBlockedApps] = useState(false);
 
   const scrollViewRef = useRef<ScrollView>(null);
   const contentAnimation = useRef(new Animated.Value(1)).current;
@@ -194,12 +217,22 @@ export default function OnboardingScreen({
       // own privacy choice back to the default. New users get it from the
       // listener's else-branch; existing users missing it get backfilled
       // once from index.tsx's profile snapshot handler.
+      //
+      // companionHue is different: it's picked right here in onboarding, so
+      // there's no earlier write to fall back on. Still guarded the same
+      // way — only set it if nothing's there yet, so a returning user who
+      // signs out and re-runs onboarding never has their saved color
+      // silently reset back to whatever the picker was showing.
+      const existingDoc = await getDoc(userDocRef);
+      const shouldSetHue = existingDoc.data()?.companionHue === undefined;
+
       await setDoc(
         userDocRef,
         {
           name: userData.name,
           nameLower: userData.name.toLowerCase(),
           email: userData.email,
+          ...(shouldSetHue ? { companionHue: Math.round(companionHue) } : {}),
         },
         { merge: true }
       );
@@ -349,6 +382,36 @@ export default function OnboardingScreen({
       Alert.alert('Error', 'Could not sign out. Please try again.');
     }
   };
+
+  const handleChooseBlockedApps = async () => {
+    if (Platform.OS !== 'ios' || !BeddrScreenTime) {
+      Alert.alert(
+        'Screen Time setup needed',
+        'App blocking uses Apple Screen Time and needs a rebuilt iOS app with the BeddrScreenTime native module.'
+      );
+      return;
+    }
+
+    setIsPickingBlockedApps(true);
+
+    try {
+      const summary = await BeddrScreenTime.requestAuthorizationAndSelectApps();
+      setBlockedSelectionSummary(summary);
+    } catch (error: any) {
+      const message =
+        error?.message ||
+        'Could not open the Screen Time app picker. Make sure you are testing on a real iPhone with Family Controls enabled.';
+      Alert.alert('Could not choose apps', message);
+    } finally {
+      setIsPickingBlockedApps(false);
+    }
+  };
+
+  const blockedItemCount =
+    (blockedSelectionSummary?.selectedApps ?? 0) +
+    (blockedSelectionSummary?.selectedCategories ?? 0) +
+    (blockedSelectionSummary?.selectedWebDomains ?? 0);
+
   const steps: OnboardingStep[] = [
     {
       id: 0,
@@ -399,7 +462,7 @@ export default function OnboardingScreen({
               <View style={styles.stepInfo}>
                 <Text style={styles.stepTitle}>Stay Off Your Phone</Text>
                 <Text style={styles.stepText}>
-                  Your locked time builds while you stay in this app (off of other distracting apps) or have your phone locked. Locked-in time is estimated based on app usage and lock state.
+                  Your locked time builds while you stay in this app (off of other distracting apps) or have your phone locked. If you choose apps to block, Beddr actively restricts them for the length of your session using Apple Screen Time — otherwise, locked-in time is estimated based on app usage and lock state.
                 </Text>
               </View>
             </View>
@@ -429,6 +492,151 @@ export default function OnboardingScreen({
     },
     {
       id: 2,
+      title: 'Choose Apps to Block',
+      subtitle: 'Optional — makes lock-in sessions stick',
+      icon: 'shield-checkmark',
+      content: (
+        <View style={styles.stepContent}>
+          <View style={styles.claimInfo}>
+            <Ionicons name="apps-outline" size={30} color={strongColor} />
+            <Text style={styles.claimTitle}>
+              {blockedItemCount > 0 ? `${blockedItemCount} selected` : 'No apps selected yet'}
+            </Text>
+            <Text style={styles.claimText}>
+              {blockedSelectionSummary?.isAvailable === false
+                ? 'Available on real iPhone builds after native setup.'
+                : 'Apple keeps selected app names private, so Beddr stores secure tokens only.'}
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.chooseAppsButton,
+              isPickingBlockedApps && styles.chooseAppsButtonDisabled,
+            ]}
+            onPress={handleChooseBlockedApps}
+            disabled={isPickingBlockedApps}
+          >
+            <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
+            <Text style={styles.chooseAppsButtonText}>
+              {isPickingBlockedApps ? 'Opening Picker...' : 'Choose Apps to Block'}
+            </Text>
+          </TouchableOpacity>
+
+          <Text style={styles.skippableNote}>
+            You can skip this and set it up anytime later from your profile.
+          </Text>
+        </View>
+      ),
+    },
+    {
+      id: 3,
+      title: 'Meet Your Blob',
+      subtitle: 'Your companion lives on your home screen',
+      icon: 'moon',
+      content: (
+        <View style={styles.stepContent}>
+          <View style={styles.featuresList}>
+            <View style={styles.featureItem}>
+              <Ionicons name="moon-outline" size={24} color={strongColor} />
+              <Text style={styles.featureText}>
+                Your blob sleeps while you&apos;re locked out, and wakes up — bouncing, blinking, and all — the moment you lock in
+              </Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="sparkles-outline" size={24} color={strongColor} />
+              <Text style={styles.featureText}>
+                Sparkles build up around your blob the more you lock in today, and reset naturally at midnight
+              </Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="headset-outline" size={24} color={strongColor} />
+              <Text style={styles.featureText}>
+                While locked in, give your blob a look — headphones, a book, or a laptop — from your home screen
+              </Text>
+            </View>
+          </View>
+        </View>
+      ),
+    },
+    {
+      id: 4,
+      title: "Choose Your Blob's Color",
+      subtitle: 'You can always change this later in your profile',
+      icon: 'color-palette',
+      content: (
+        <View style={styles.stepContent}>
+          <BlobCompanion hue={companionHue} size={140} />
+
+          <View style={styles.companionColorHeader}>
+            <Text style={styles.companionColorSubtitle}>Drag to choose your companion&apos;s hue.</Text>
+            <Text style={styles.companionHueValue}>{`${Math.round(companionHue)}°`}</Text>
+          </View>
+
+          <Slider
+            accessibilityLabel="Blob color hue"
+            maximumTrackTintColor="rgba(255,255,255,0.18)"
+            maximumValue={359}
+            minimumTrackTintColor={strongColor}
+            minimumValue={0}
+            onValueChange={setCompanionHue}
+            step={1}
+            style={styles.companionHueSlider}
+            thumbTintColor={`hsl(${companionHue}, 82%, 66%)`}
+            value={companionHue}
+          />
+        </View>
+      ),
+    },
+    {
+      id: 5,
+      title: 'Friends & Locking In Together',
+      subtitle: 'Optional — focus is more fun together',
+      icon: 'people-circle',
+      content: (
+        <View style={styles.stepContent}>
+          <View style={styles.stepsContainer}>
+            <View style={styles.howItWorksStep}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>1</Text>
+              </View>
+              <View style={styles.stepInfo}>
+                <Text style={styles.stepTitle}>Add Friends</Text>
+                <Text style={styles.stepText}>
+                  Share your friend code or search by name from the home screen. You control whether your name is searchable and whether your online status is visible, in your privacy settings.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.howItWorksStep}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>2</Text>
+              </View>
+              <View style={styles.stepInfo}>
+                <Text style={styles.stepTitle}>Invite Them to Lock In</Text>
+                <Text style={styles.stepText}>
+                  While locked in, invite a friend to join you. They&apos;ll see a banner in the app if they have it open — this doesn&apos;t send a push notification.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.howItWorksStep}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>3</Text>
+              </View>
+              <View style={styles.stepInfo}>
+                <Text style={styles.stepTitle}>Lock In Side by Side</Text>
+                <Text style={styles.stepText}>
+                  Everyone&apos;s companion shows up together in real time, and you can leave the group anytime without ending your own session.
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      ),
+    },
+    {
+      id: 6,
       title: 'Join or Create Competitions',
       subtitle: 'Play with friends your way',
       icon: 'people',
@@ -469,7 +677,7 @@ export default function OnboardingScreen({
       ),
     },
     {
-      id: 3,
+      id: 7,
       title: 'Different Ways to Win',
       subtitle: 'Each competition can have its own rules',
       icon: 'ribbon',
@@ -495,7 +703,7 @@ export default function OnboardingScreen({
       ),
     },
     {
-      id: 4,
+      id: 8,
       title: 'See Your Progress',
       subtitle: 'Your profile keeps score',
       icon: 'person',
@@ -519,7 +727,7 @@ export default function OnboardingScreen({
       ),
     },
     {
-      id: 5,
+      id: 9,
       title: 'Ready to Play?',
       subtitle: 'Sign in to create your profile and start competing',
       icon: 'log-in',
@@ -910,6 +1118,59 @@ const styles = StyleSheet.create({
     padding: 20,
     width: '100%',
     alignItems: 'center',
+    marginBottom: 20,
+  },
+  chooseAppsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: strongColor,
+    borderRadius: 14,
+    paddingVertical: 15,
+    width: '100%',
+    gap: 8,
+  },
+  chooseAppsButtonDisabled: {
+    opacity: 0.68,
+  },
+  chooseAppsButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: defFontType,
+  },
+  skippableNote: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 16,
+    fontFamily: defFontType,
+  },
+  companionColorHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    width: '100%',
+    gap: 8,
+    justifyContent: 'space-between',
+    marginTop: 24,
+  },
+  companionColorSubtitle: {
+    color: '#B0B0B0',
+    fontFamily: defFontType,
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+  },
+  companionHueValue: {
+    color: strongColor,
+    fontFamily: defFontType,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  companionHueSlider: {
+    height: 40,
+    marginTop: 8,
+    width: '100%',
   },
   claimTitle: {
     fontSize: 16,

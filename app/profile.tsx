@@ -20,7 +20,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
-  Image,
   Linking,
   NativeModules,
   Platform,
@@ -33,6 +32,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BlobAvatar } from '../components/BlobAvatar';
 import { BlobCompanion } from '../components/BlobCompanion';
 import { auth, firestore } from '../firebase';
 import { useUser } from './_layout';
@@ -43,6 +43,7 @@ const l2bgColor = "#322f4eff";
 const strongColor = "#cc7bdbff";
 
 const defFontType = "OpenSansSemiBold";
+const AVATAR_SIZE = 78;
 
 type BlockedSelectionSummary = {
   isAvailable: boolean;
@@ -990,13 +991,6 @@ export default function ProfileScreen() {
   }
 
   const displayName = userProfile?.name || userData?.name || 'User';
-  const profilePicture = userData?.profilePicture;
-  const initials = displayName
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join('') || 'U';
   const totalLockedMinutes =
     userProfile?.totalLockedMinutes ?? getAllTimeLockedMinutes(userProfile?.lockedEvents);
   const weeklyLockedMinutes =
@@ -1024,11 +1018,7 @@ export default function ProfileScreen() {
             <>
               <Animated.View style={[getAnimatedStyle(titleAnimation), styles.profileHero]}>
                 <View style={styles.avatarWrap}>
-                  {profilePicture ? (
-                    <Image source={{ uri: profilePicture }} style={styles.avatarImage} />
-                  ) : (
-                    <Text style={styles.avatarInitials}>{initials}</Text>
-                  )}
+                  <BlobAvatar hue={userProfile?.companionHue ?? 0} size={AVATAR_SIZE} />
                 </View>
 
                 <View style={styles.heroCopy}>
@@ -1553,9 +1543,9 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(204, 123, 219, 0.22)',
   },
   avatarWrap: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
     backgroundColor: 'rgba(157, 78, 221, 0.15)',
     borderWidth: 1.5,
     borderColor: strongColor,
@@ -1563,16 +1553,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 16,
     overflow: 'hidden',
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-  },
-  avatarInitials: {
-    color: strongColor,
-    fontFamily: defFontType,
-    fontSize: 26,
-    fontWeight: '700',
   },
   heroCopy: {
     flex: 1,

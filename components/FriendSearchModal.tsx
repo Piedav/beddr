@@ -14,8 +14,11 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BlobAvatar } from './BlobAvatar';
 import { firestore } from '../firebase';
 import { sendFriendRequestToUid } from '../lib/friends';
+
+const RESULT_AVATAR_SIZE = 40;
 
 const bgColor = '#111124ff';
 const l2bgColor = '#322f4eff';
@@ -26,6 +29,7 @@ const defFontType = 'OpenSansSemiBold';
 type SearchResult = {
   uid: string;
   name: string;
+  companionHue: number;
 };
 
 type FriendSearchModalProps = {
@@ -97,6 +101,7 @@ export function FriendSearchModal({
             .map((docSnap) => ({
               uid: docSnap.id,
               name: (docSnap.data() as any).name?.trim() || 'User',
+              companionHue: (docSnap.data() as any).companionHue ?? 0,
             }))
             .filter((result) => result.uid !== uid)
         );
@@ -172,9 +177,7 @@ export function FriendSearchModal({
             return (
               <View key={result.uid} style={styles.resultRow}>
                 <View style={styles.resultAvatar}>
-                  <Text style={styles.resultAvatarText}>
-                    {result.name.slice(0, 1).toUpperCase()}
-                  </Text>
+                  <BlobAvatar hue={result.companionHue} size={RESULT_AVATAR_SIZE} />
                 </View>
 
                 <Text style={styles.resultName} numberOfLines={1}>
@@ -281,20 +284,15 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   resultAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: RESULT_AVATAR_SIZE,
+    height: RESULT_AVATAR_SIZE,
+    borderRadius: RESULT_AVATAR_SIZE / 2,
     backgroundColor: 'rgba(157, 78, 221, 0.15)',
     borderWidth: 1,
     borderColor: strongColor,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  resultAvatarText: {
-    fontFamily: defFontType,
-    color: strongColor,
-    fontSize: 15,
-    fontWeight: '700',
+    overflow: 'hidden',
   },
   resultName: {
     flex: 1,

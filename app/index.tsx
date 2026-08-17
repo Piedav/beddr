@@ -30,7 +30,8 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BlobCompanion } from '../components/BlobCompanion';
+import { BlobAvatar } from '../components/BlobAvatar';
+import { BlobCompanion, type CompanionAccessory } from '../components/BlobCompanion';
 import { FriendSearchModal } from '../components/FriendSearchModal';
 import { auth, firestore } from '../firebase';
 import {
@@ -132,6 +133,7 @@ interface UserProfile {
   starredFriends?: string[];
   sparkleLevel?: number;
   shareSparkleLevel?: boolean;
+  companionAccessory?: CompanionAccessory;
 }
 
 type FriendRequest = {
@@ -338,12 +340,21 @@ function getTodayLockedMinutes(
   return getLockedMinutesInRange(events, getStartOfDayMs(new Date(nowMs)), nowMs, nowMs);
 }
 
-const SPARKLE_FULL_HOURS = 12;
+const SPARKLE_FULL_HOURS = 18;
 
 function getSparkleLevel(events?: LockedEvent[], nowMs: number = Date.now()): number {
   const todayMinutes = getTodayLockedMinutes(events, nowMs);
   return Math.max(0, Math.min(1, todayMinutes / (SPARKLE_FULL_HOURS * 60)));
 }
+
+const FRIEND_AVATAR_SIZE = 36;
+
+const ACCESSORY_OPTIONS: { key: CompanionAccessory; label: string }[] = [
+  { key: 'default', label: 'Default' },
+  { key: 'headphones', label: 'Headphones' },
+  { key: 'book', label: 'Book' },
+  { key: 'laptop', label: 'Laptop' },
+];
 
 export default function HomeScreen() {
   const { userData } = useUser();
@@ -373,7 +384,13 @@ export default function HomeScreen() {
   const [sessionMemberProfiles, setSessionMemberProfiles] = useState<
     Record<
       string,
-      { name: string; companionHue: number; sparkleLevel: number; shareSparkleLevel: boolean }
+      {
+        name: string;
+        companionHue: number;
+        sparkleLevel: number;
+        shareSparkleLevel: boolean;
+        companionAccessory: CompanionAccessory;
+      }
     >
   >({});
   const [groupCompanionGridWidth, setGroupCompanionGridWidth] = useState(0);
@@ -393,8 +410,18 @@ export default function HomeScreen() {
   const [todayLockedMinutes, setTodayLockedMinutes] = useState(0);
   const [lockedEvents, setLockedEvents] = useState<LockedEvent[]>([]);
   const [nowMs, setNowMs] = useState(Date.now());
+  // Both the unlocked and locked-in versions of the header/stats blocks are
+  // measured, and the larger of each pair is forced onto both via minHeight.
+  // Measuring only one side (the old approach) only protects against that
+  // side being the taller one — if the other side's natural content ever
+  // grows past it, minHeight can't shrink it back down, and everything below
+  // (the blob, the friends list) silently shifts.
   const [unlockedHeaderHeight, setUnlockedHeaderHeight] = useState(0);
-  const [statsRowHeight, setStatsRowHeight] = useState(0);
+  const [lockedHeaderHeight, setLockedHeaderHeight] = useState(0);
+  const [unlockedStatsRowHeight, setUnlockedStatsRowHeight] = useState(0);
+  const [lockedStatsRowHeight, setLockedStatsRowHeight] = useState(0);
+  const headerMinHeight = Math.max(unlockedHeaderHeight, lockedHeaderHeight);
+  const statsRowMinHeight = Math.max(unlockedStatsRowHeight, lockedStatsRowHeight);
   const sparkleLevelWriteRef = useRef<number | null>(null);
   const [welcomeNeedsBreak, setWelcomeNeedsBreak] = useState(false);
 
@@ -1041,6 +1068,7 @@ export default function HomeScreen() {
               companionHue: data?.companionHue ?? 0,
               sparkleLevel: data?.sparkleLevel ?? 0,
               shareSparkleLevel: data?.shareSparkleLevel ?? true,
+              companionAccessory: (data?.companionAccessory as CompanionAccessory) ?? 'default',
             },
           }));
         },
@@ -1405,6 +1433,37 @@ export default function HomeScreen() {
     : 0;
 
   const sparkleLevel = getSparkleLevel(lockedEvents, nowMs);
+  const companionAccessory: CompanionAccessory = userProfile?.companionAccessory ?? 'default';
+
+  const handleSelectAccessory = (accessory: CompanionAccessory) => {
+    if (!uid || accessory === companionAccessory) return;
+    updateDoc(doc(firestore, 'profiledb', uid), { companionAccessory: accessory }).catch((err) =>
+      console.error('Failed to save companion accessory:', err)
+    );
+  };
+
+  const accessoryPickerRow = (
+    <View style={styles.accessoryPickerRow}>
+      {ACCESSORY_OPTIONS.map((option) => {
+        const isSelected = companionAccessory === option.key;
+        return (
+          <TouchableOpacity
+            key={option.key}
+            style={[styles.accessoryButton, isSelected && styles.accessoryButtonSelected]}
+            onPress={() => handleSelectAccessory(option.key)}
+            accessibilityRole="button"
+            accessibilityLabel={`Set companion look to ${option.label}`}
+          >
+            <Text
+              style={[styles.accessoryButtonText, isSelected && styles.accessoryButtonTextSelected]}
+            >
+              {option.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
 
   const starredFriendUids = userProfile?.starredFriends ?? [];
   const sortedFriendUids = [...friendUids].sort((a, b) => {
@@ -1433,6 +1492,7 @@ export default function HomeScreen() {
                 <View>
                   {!theButtonPressed ? (
                   <View
+                    style={headerMinHeight > 0 && { minHeight: headerMinHeight }}
                     onLayout={(event) =>
                       setUnlockedHeaderHeight(event.nativeEvent.layout.height)
                     }
@@ -1469,15 +1529,20 @@ export default function HomeScreen() {
                       style={[
                         styles.lockedInContainer,
                         // minHeight, not height: this is a target to match,
-                        // not a hard cap. If the clock's actual rendered
-                        // size on a given device/screen ever exceeds the
-                        // measured unlockedHeaderHeight, a fixed height
-                        // would force it into a box too small to hold it —
-                        // centered content in an undersized fixed-height box
-                        // can end up rendered outside the visible bounds
-                        // entirely rather than just looking cramped.
-                        unlockedHeaderHeight > 0 && { minHeight: unlockedHeaderHeight },
+                        // not a hard cap. If either side's actual rendered
+                        // content ever exceeds the other's measured height,
+                        // a fixed height would force it into a box too small
+                        // to hold it — centered content in an undersized
+                        // fixed-height box can end up rendered outside the
+                        // visible bounds entirely rather than just looking
+                        // cramped. headerMinHeight is the max of both sides'
+                        // measurements, so whichever is naturally taller
+                        // sets the floor for both.
+                        headerMinHeight > 0 && { minHeight: headerMinHeight },
                       ]}
+                      onLayout={(event) =>
+                        setLockedHeaderHeight(event.nativeEvent.layout.height)
+                      }
                     >
                       <Text style={styles.lockClockText}>
                         {formatClockTime(new Date(nowMs))}
@@ -1489,8 +1554,11 @@ export default function HomeScreen() {
                     <View
                       style={[
                         styles.lockedInRow,
-                        statsRowHeight > 0 && { minHeight: statsRowHeight },
+                        statsRowMinHeight > 0 && { minHeight: statsRowMinHeight },
                       ]}
+                      onLayout={(event) =>
+                        setLockedStatsRowHeight(event.nativeEvent.layout.height)
+                      }
                     >
                       <View style={styles.lockedInStatBox}>
                         <Text
@@ -1531,8 +1599,12 @@ export default function HomeScreen() {
                   {!theButtonPressed && (
                     <Animated.View style={getAnimatedStyle(progressAnimation)}>
                       <View
-                        style={[styles.row, styles.competitionContainer]}
-                        onLayout={(e) => setStatsRowHeight(e.nativeEvent.layout.height)}
+                        style={[
+                          styles.row,
+                          styles.competitionContainer,
+                          statsRowMinHeight > 0 && { minHeight: statsRowMinHeight },
+                        ]}
+                        onLayout={(e) => setUnlockedStatsRowHeight(e.nativeEvent.layout.height)}
                       >
                         <View style={styles.competitionStatBox}>
                           <Text
@@ -1596,6 +1668,10 @@ export default function HomeScreen() {
                                   : liveProfile?.shareSparkleLevel !== false
                                   ? liveProfile?.sparkleLevel ?? 0
                                   : 0;
+                              const displayAccessory =
+                                memberUid === uid
+                                  ? companionAccessory
+                                  : liveProfile?.companionAccessory ?? 'default';
 
                               return (
                                 <View
@@ -1606,6 +1682,8 @@ export default function HomeScreen() {
                                     hue={displayHue}
                                     size={blobSize}
                                     sparkleLevel={displaySparkleLevel}
+                                    awake
+                                    accessory={displayAccessory}
                                   />
                                   <Text
                                     style={[styles.groupCompanionName, { maxWidth: blobSize }]}
@@ -1617,6 +1695,8 @@ export default function HomeScreen() {
                               );
                             })}
                           </View>
+
+                          {theButtonPressed && accessoryPickerRow}
 
                           <TouchableOpacity
                             style={styles.leaveGroupButton}
@@ -1638,11 +1718,16 @@ export default function HomeScreen() {
                       );
                     })()
                   ) : (
-                    <BlobCompanion
-                      hue={userProfile?.companionHue ?? 0}
-                      style={styles.companion}
-                      sparkleLevel={sparkleLevel}
-                    />
+                    <>
+                      <BlobCompanion
+                        hue={userProfile?.companionHue ?? 0}
+                        style={styles.companion}
+                        sparkleLevel={sparkleLevel}
+                        awake={theButtonPressed}
+                        accessory={companionAccessory}
+                      />
+                      {theButtonPressed && accessoryPickerRow}
+                    </>
                   )}
                 </View>
 
@@ -1766,9 +1851,7 @@ export default function HomeScreen() {
                         <View style={styles.friendRow}>
                           <View style={styles.friendAvatarWrap}>
                             <View style={styles.friendAvatar}>
-                              <Text style={styles.friendAvatarText}>
-                                {(friend?.name ?? '?').slice(0, 1).toUpperCase()}
-                              </Text>
+                              <BlobAvatar hue={friend?.companionHue ?? 0} size={FRIEND_AVATAR_SIZE} />
                             </View>
                             {isOnline && <View style={styles.onlineDot} />}
                           </View>
@@ -2068,7 +2151,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0,
     shadowRadius: 8,
     elevation: 5,
   },
@@ -2196,20 +2279,15 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   friendAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: FRIEND_AVATAR_SIZE,
+    height: FRIEND_AVATAR_SIZE,
+    borderRadius: FRIEND_AVATAR_SIZE / 2,
     backgroundColor: 'rgba(157, 78, 221, 0.15)',
     borderWidth: 1,
     borderColor: strongColor,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  friendAvatarText: {
-    fontFamily: defFontType,
-    color: strongColor,
-    fontSize: 14,
-    fontWeight: '700',
+    overflow: 'hidden',
   },
   onlineDot: {
     position: 'absolute',
@@ -2291,6 +2369,34 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  accessoryPickerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  accessoryButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  accessoryButtonSelected: {
+    backgroundColor: buttonPressedColor,
+    borderColor: strongColor,
+  },
+  accessoryButtonText: {
+    fontFamily: defFontType,
+    color: '#CFCFE6',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  accessoryButtonTextSelected: {
+    color: strongColor,
+  },
   username: {
     fontWeight: '600',
     color: strongColor,
@@ -2358,7 +2464,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0,
     shadowRadius: 8,
     elevation: 5,
   },
@@ -2569,11 +2675,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    // Height is forced to match the measured locked-out stats row (see
-    // statsRowHeight/onLayout above) rather than hand-tuned padding, so this
-    // stays correct automatically no matter what font sizes end up being on
-    // either row — alignItems: 'center' takes care of centering the
-    // content within whatever that measured height turns out to be.
+    // Height is forced to the larger of this row's and the locked-out
+    // stats row's measured natural heights (see statsRowMinHeight above)
+    // rather than hand-tuned padding, so this stays correct automatically
+    // no matter what font sizes end up being on either row — alignItems:
+    // 'center' takes care of centering the content within that height.
     marginBottom: 16,
   },
 

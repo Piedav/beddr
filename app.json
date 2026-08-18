@@ -13,9 +13,7 @@
       "bundleIdentifier": "com.dmao.beddr",
       "useFrameworks": "dynamic",
       "usesAppleSignIn": true,
-      "infoPlist": {
-        "NSUserNotificationsUsageDescription": "Beddr uses notifications to let you know when your lock-in session ends."
-      }
+      "buildNumber": "24"
     },
     "android": {
       "googleServicesFile": "./google-services.json",
